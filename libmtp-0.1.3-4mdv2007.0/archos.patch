@@ -1,0 +1,140 @@
+diff -cr libmtp-0.1.3/src/libmtp.c libmtp-0.1.3-archos/src/libmtp.c
+*** libmtp-0.1.3/src/libmtp.c	2007-01-11 22:26:02.000000000 +0100
+--- libmtp-0.1.3-archos/src/libmtp.c	2007-01-29 22:07:59.575614249 +0100
+***************
+*** 1476,1481 ****
+--- 1476,1482 ----
+   *        properities could not be retrieved and -1 means failure.
+   * @see LIBMTP_Get_Filetype_Description()
+   */
++ 
+  int LIBMTP_Get_Storage(LIBMTP_mtpdevice_t *device, int const sortby)
+  {
+    uint32_t i = 0;
+***************
+*** 1559,1564 ****
+--- 1560,1592 ----
+    }
+  }
+  
++ /* This function is a wrapper for <code> LIBMTP_Get_Storage </code>
++  * as that is frequently used in the outside world.
++  * However, we put a nice DEPRECATED into everybodys' faces.
++  * */
++ int LIBMTP_Get_Storageinfo(	LIBMTP_mtpdevice_t *mtpdevice,	uint64_t * const totalbytes,
++ 							uint64_t * const freebytes,	char ** const storage_description,
++ 							char ** const volume_label)
++ {
++   printf("WARNING: LIBMTP_Get_Storageinfo() is DEPRECATED.\n");
++   printf("WARNING: please update your code to use LIBMTP_Get_Storage() !\n");
++ 
++ 	int ret;
++ 	ret = LIBMTP_Get_Storage(mtpdevice, LIBMTP_STORAGE_SORTBY_NOTSORTED);
++ 	if (ret == 0) {
++ 		*totalbytes = mtpdevice->storage->MaxCapacity;
++ 		*freebytes = mtpdevice->storage->FreeSpaceInBytes;
++ 
++         // These are not used right now.
++ 		*storage_description = NULL;
++ 		*volume_label = NULL;
++ 	} else {
++ 		*totalbytes = 0;
++ 		*freebytes = 0;
++ 	}
++ 	return ret;
++ }
++ 
+  /**
+   * This creates a new file metadata structure and allocates memory
+   * for it. Notice that if you add strings to this structure they
+diff -cr libmtp-0.1.3/src/libmtp.h.in libmtp-0.1.3-archos/src/libmtp.h.in
+*** libmtp-0.1.3/src/libmtp.h.in	2007-01-06 17:50:50.000000000 +0100
+--- libmtp-0.1.3-archos/src/libmtp.h.in	2007-01-29 22:44:14.023047993 +0100
+***************
+*** 316,322 ****
+  
+  int LIBMTP_Get_Storage(LIBMTP_mtpdevice_t *, int const);
+  int LIBMTP_Format_Storage(LIBMTP_mtpdevice_t *, LIBMTP_devicestorage_t *);
+! 
+  
+  /**
+   * @}
+--- 316,326 ----
+  
+  int LIBMTP_Get_Storage(LIBMTP_mtpdevice_t *, int const);
+  int LIBMTP_Format_Storage(LIBMTP_mtpdevice_t *, LIBMTP_devicestorage_t *);
+! int LIBMTP_Get_Storageinfo(LIBMTP_mtpdevice_t *,
+!                            uint64_t * const,
+!                            uint64_t * const,
+!                            char ** const storage_description,
+!                            char ** const volume_label);
+  
+  /**
+   * @}
+diff -cr libmtp-0.1.3/src/libusb-glue.c libmtp-0.1.3-archos/src/libusb-glue.c
+*** libmtp-0.1.3/src/libusb-glue.c	2007-01-16 21:36:17.000000000 +0100
+--- libmtp-0.1.3-archos/src/libusb-glue.c	2007-01-29 22:07:59.671599657 +0100
+***************
+*** 184,189 ****
+--- 184,191 ----
+     */
+    // Reported by gudul1@users.sourceforge.net
+    { "Archos 104 (MTP mode)", 0x0e79, 0x120a, DEVICE_FLAG_NONE },
++   // Added by Jan Binder
++   { "Archos XS202 (MTP mode)", 0x0e79, 0x1208, DEVICE_FLAG_NONE },
+  
+    /*
+     * Dunlop (OEM of EGOMAN ltd?) reported by Nanomad
+diff -cr libmtp-0.1.3/src/ptp-pack.c libmtp-0.1.3-archos/src/ptp-pack.c
+*** libmtp-0.1.3/src/ptp-pack.c	2007-01-08 00:08:48.000000000 +0100
+--- libmtp-0.1.3-archos/src/ptp-pack.c	2007-01-29 22:07:59.673599353 +0100
+***************
+*** 109,116 ****
+  			string[i]=dtoh16a(&data[offset+i*2+1]);
+  		}
+  		/* be paranoid! Add a terminator. :( */
+  		string[loclen]=0x0000U;
+! 		loclstr[0]='\0';
+  		/* loclstr=ucs2_to_utf8(string); */
+  		/* Do the conversion.  */
+  		nconv = iconv (params->cd_ucs2_to_locale, &stringp, &convlen, &locp, &convmax);
+--- 109,123 ----
+  			string[i]=dtoh16a(&data[offset+i*2+1]);
+  		}
+  		/* be paranoid! Add a terminator. :( */
++ 		/* be more paranoid: clear loclstr as there were some nasty issues*/
++ 		for(i=0;i<PTP_MAXSTRLEN*3+1;i++) {
++ 			loclstr[i] = '\0';
++ 		}
+  		string[loclen]=0x0000U;
+! 		/*loclstr[0]='\0'; //Not needed any more as localstr is wiped clean
+! 		 * which certainly is not good practice, but the other mechanism seems
+! 		 * to fail and we dont know how wide our char is
+! 		 */
+  		/* loclstr=ucs2_to_utf8(string); */
+  		/* Do the conversion.  */
+  		nconv = iconv (params->cd_ucs2_to_locale, &stringp, &convlen, &locp, &convmax);
+***************
+*** 606,614 ****
+  	/* XXX: other int arrays are unimplemented also */
+  	case PTP_DTC_STR: {
+  		uint8_t len;
+! 		/* XXX: max size */
+  		value->str = ptp_unpack_string(params,data,*offset,&len);
+  		*offset += len*2+1;
+  		if (!value->str)
+  			return 0;
+  		break;
+--- 613,622 ----
+  	/* XXX: other int arrays are unimplemented also */
+  	case PTP_DTC_STR: {
+  		uint8_t len;
+! 		/* XXX: max size: somewhat fixed now, i guess, quick and dirty solution */
+  		value->str = ptp_unpack_string(params,data,*offset,&len);
+  		*offset += len*2+1;
++ 		/*printf("[D: %s :%d :%d ]\n", value->str, *offset, len);*/
+  		if (!value->str)
+  			return 0;
+  		break;
+
+ 	  	 

@@ -1,0 +1,37 @@
+2007-03-14  Gwenole Beauchesne  <gbeauchesne@mandriva.com>
+
+	* sdl.c (sdl_update_caption): Report KQEMU accelerator accordingly
+	in the SDL window.
+
+--- qemu-0.9.0/sdl.c.kvm-kqemu-window-caption	2007-03-14 17:59:05.000000000 +0100
++++ qemu-0.9.0/sdl.c	2007-03-14 18:02:55.000000000 +0100
+@@ -212,13 +212,27 @@ static void sdl_process_key(SDL_Keyboard
+ 
+ static void sdl_update_caption(void)
+ {
++    int accl_mode = 0; /* 1=kqemu, 2=kvm */
+     char buf[1024];
+     strcpy(buf, "QEMU");
+-#if USE_KVM
++#ifdef USE_KQEMU
++    if (kqemu_allowed) {
++        accl_mode = 1;
++    }
++#endif
++#ifdef USE_KVM
+     if (kvm_allowed) {
+-        strcat(buf, "/KVM");
++        accl_mode = 2;
+     }
+ #endif
++    switch (accl_mode) {
++    case 1:
++        strcat(buf, "/KQEMU");
++        break;
++    case 2:
++        strcat(buf, "/KVM");
++        break;
++    }
+     if (!vm_running) {
+         strcat(buf, " [Stopped]");
+     }

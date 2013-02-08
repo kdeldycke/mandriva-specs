@@ -1,0 +1,15 @@
+--- configure.in	2006-11-29 23:14:27.000000000 +0000
++++ new	2007-04-29 16:15:53.000000000 +0100
+@@ -124,6 +124,7 @@
+ libs/midiout/Makefile
+ libs/midi-inout/Makefile
+ libs/soundtolight/Makefile
++libs/lla/Makefile
+ dce/Makefile
+ main/Makefile
+ devices/Makefile
+--- libs/Makefile.am	2006-02-03 19:44:32.000000000 +0000
++++ libs/Makefile.am.new	2007-04-29 16:14:54.000000000 +0100
+@@ -1 +1 @@
+-SUBDIRS = common dmx4linuxout midiout soundtolight usbdmxout midi-inout
++SUBDIRS = common dmx4linuxout midiout soundtolight usbdmxout midi-inout lla

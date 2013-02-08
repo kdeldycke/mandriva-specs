@@ -1,0 +1,33 @@
+--- lib/JAMA/tnt_math_utils.h.orig
++++ lib/JAMA/tnt_math_utils.h
+@@ -20,4 +20,14 @@
+ namespace TNT
+ {
++
++/**
++	@returns the absolute value of a real (no-complex) scalar.
++*/
++template <class Real>
++Real abs(const Real &a)
++{
++	return  (a > 0 ? a : -a);
++}
++
+ /**
+ 	@returns hypotenuse of real (non-complex) scalars a and b by 
+@@ -56,15 +66,6 @@
+ }
+ */
+-
+-/**
+-	@returns the absolute value of a real (no-complex) scalar.
+-*/
+-template <class Real>
+-Real abs(const Real &a)
+-{
+-	return  (a > 0 ? a : -a);
+ }
+ 
+-}
+ #endif
+ /* MATH_UTILS_H */

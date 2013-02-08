@@ -1,0 +1,57 @@
+From gbeauchesne@mandriva.com Tue Mar 13 17:01:17 2007
+Date: Tue, 20 Feb 2007 01:44:37 +0100 (CET)
+From: Gwenole Beauchesne <gbeauchesne@mandriva.com>
+Reply-To: qemu-devel@nongnu.org
+To: qemu-devel@nongnu.org
+Subject: [Qemu-devel] [PATCH] Fix CPU chaining in linux-user emulation
+
+Hi,
+
+This patch fixes chaining of CPU instances. It was simply trashed with the
+memcpy() thus causing problems in threaded programs (N > 2): an infinite
+loop in next cpu_init().
+
+--- qemu-0.9.0/linux-user/syscall.c.fix-cpus-chaining	2007-02-13 14:41:12.000000000 +0100
++++ qemu-0.9.0/linux-user/syscall.c	2007-03-13 18:58:56.000000000 +0100
+@@ -1720,8 +1720,7 @@ int do_fork(CPUState *env, unsigned int 
+         ts->next = first_task_state;
+         first_task_state = ts;
+         /* we create a new CPU instance. */
+-        new_env = cpu_init();
+-        memcpy(new_env, env, sizeof(CPUState));
++        new_env = cpu_copy(env);
+ #if defined(TARGET_I386)
+         if (!newsp)
+             newsp = env->regs[R_ESP];
+--- qemu-0.9.0/exec.c.fix-cpus-chaining	2007-03-13 18:44:27.000000000 +0100
++++ qemu-0.9.0/exec.c	2007-03-13 18:58:56.000000000 +0100
+@@ -1223,6 +1223,18 @@ void cpu_abort(CPUState *env, const char
+     abort();
+ }
+ 
++CPUState *cpu_copy(CPUState *env)
++{
++    CPUState *new_env = cpu_init();
++    /* preserve chaining and index */
++    CPUState *next_cpu = new_env->next_cpu;
++    int cpu_index = new_env->cpu_index;
++    memcpy(new_env, env, sizeof(CPUState));
++    new_env->next_cpu = next_cpu;
++    new_env->cpu_index = cpu_index;
++    return new_env;
++}
++
+ #if !defined(CONFIG_USER_ONLY)
+ 
+ /* NOTE: if flush_global is true, also flush global entries (not
+--- qemu-0.9.0/cpu-all.h.fix-cpus-chaining	2007-03-13 18:44:01.000000000 +0100
++++ qemu-0.9.0/cpu-all.h	2007-03-13 18:58:56.000000000 +0100
+@@ -760,6 +760,8 @@ void page_unprotect_range(target_ulong d
+ 
+ #endif /* SINGLE_CPU_DEFINES */
+ 
++CPUState *cpu_copy(CPUState *env);
++
+ void cpu_dump_state(CPUState *env, FILE *f, 
+                     int (*cpu_fprintf)(FILE *f, const char *fmt, ...),
+                     int flags);

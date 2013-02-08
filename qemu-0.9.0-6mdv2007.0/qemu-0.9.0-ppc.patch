@@ -1,0 +1,26 @@
+--- qemu-0.9.0/ppc.ld.ppc	2005-06-05 17:57:04.000000000 +0200
++++ qemu-0.9.0/ppc.ld	2007-02-17 18:00:30.000000000 +0100
+@@ -2,8 +2,8 @@
+  * Written by Martin Mares <mj@atrey.karlin.mff.cuni.cz>;
+  */
+ OUTPUT_FORMAT("elf32-powerpc", "elf32-powerpc", "elf32-powerpc")
+-OUTPUT_ARCH(powerpc)
+-SEARCH_DIR(/lib); SEARCH_DIR(/usr/lib); SEARCH_DIR(/usr/local/lib); SEARCH_DIR(/usr/alpha-unknown-linux-gnu/lib);
++OUTPUT_ARCH(powerpc:common)
++SEARCH_DIR("/lib"); SEARCH_DIR("/usr/lib"); SEARCH_DIR("/usr/local/lib");
+ ENTRY(_start)
+ SECTIONS
+ {
+@@ -90,7 +90,11 @@ SECTIONS
+   /* We want the small data sections together, so single-instruction offsets
+      can access them all, and initialized data all before uninitialized, so
+      we can shorten the on-disk segment size.  */
+-  .sdata     : { *(.sdata) }
++  .sdata     :
++  {
++    PROVIDE (_SDA_BASE_ = 32768);
++    *(.sdata .sdata.* .gnu.linkonce.s.*)
++  }
+   _edata  =  .;
+   PROVIDE (edata = .);
+   __bss_start = .;

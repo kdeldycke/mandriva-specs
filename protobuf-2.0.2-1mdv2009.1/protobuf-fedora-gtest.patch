@@ -1,0 +1,111 @@
+diff --git a/configure.ac b/configure.ac
+index 32edd48..69d1ed8 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -27,6 +27,7 @@ AC_CHECK_HEADERS([fcntl.h inttypes.h limits.h stdlib.h unistd.h])
+ AC_FUNC_MEMCMP
+ AC_FUNC_STRTOD
+ AC_CHECK_FUNCS([ftruncate memset mkdir strchr strerror strtol])
++GTEST_LIB_CHECK
+ 
+ ACX_PTHREAD
+ AC_CXX_STL_HASH
+diff --git a/src/Makefile.am b/src/Makefile.am
+index c2729da..0d2583f 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -163,12 +163,7 @@ EXTRA_DIST =                                                   \
+   google/protobuf/testdata/text_format_unittest_extensions_data.txt  \
+   google/protobuf/package_info.h                               \
+   google/protobuf/io/package_info.h                            \
+-  google/protobuf/compiler/package_info.h                      \
+-  gtest/CHANGES                                                \
+-  gtest/CONTRIBUTORS                                           \
+-  gtest/COPYING                                                \
+-  gtest/README                                                 \
+-  gtest/gen_gtest_pred_impl.py
++  google/protobuf/compiler/package_info.h
+ 
+ protoc_outputs =                                               \
+   google/protobuf/unittest.pb.cc                               \
+@@ -205,7 +200,9 @@ unittest_proto_middleman: protoc$(EXEEXT) $(protoc_inputs)
+ $(protoc_outputs): unittest_proto_middleman
+ 
+ noinst_PROGRAMS = protobuf-test
+-protobuf_test_LDADD = $(PTHREAD_LIBS) libprotobuf.la libprotoc.la
++protobuf_test_CPPFLAGS = $(GTEST_CPPFLAGS)
++protobuf_test_CXXFLAGS = $(GTEST_CXXFLAGS)
++protobuf_test_LDADD = $(PTHREAD_LIBS) $(GTEST_LDFLAGS) $(GTEST_LIBS) libprotobuf.la libprotoc.la
+ protobuf_test_SOURCES =                                        \
+   google/protobuf/stubs/common_unittest.cc                     \
+   google/protobuf/stubs/strutil_unittest.cc                    \
+@@ -235,23 +232,7 @@ protobuf_test_SOURCES =                                        \
+   google/protobuf/testing/googletest.h                         \
+   google/protobuf/testing/file.cc                              \
+   google/protobuf/testing/file.h                               \
+-  gtest/gtest.cc                                               \
+-  gtest/gtest.h                                                \
+-  gtest/gtest-death-test.cc                                    \
+-  gtest/gtest-death-test.h                                     \
+-  gtest/gtest-filepath.cc                                      \
+-  gtest/gtest-internal-inl.h                                   \
+-  gtest/gtest-message.h                                        \
+-  gtest/gtest-port.cc                                          \
+-  gtest/gtest-spi.h                                            \
+-  gtest/gtest_main.cc                                          \
+-  gtest/gtest_pred_impl.h                                      \
+-  gtest/gtest_prod.h                                           \
+-  gtest/internal/gtest-death-test-internal.h                   \
+-  gtest/internal/gtest-filepath.h                              \
+-  gtest/internal/gtest-internal.h                              \
+-  gtest/internal/gtest-port.h                                  \
+-  gtest/internal/gtest-string.h
++  google/protobuf/testing/gtest_main.cc
+ 
+ nodist_protobuf_test_SOURCES = $(protoc_outputs)
+ 
+diff --git a/src/google/protobuf/testing/gtest_main.cc b/src/google/protobuf/testing/gtest_main.cc
+new file mode 100644
+index 0000000..d20c02f
+--- /dev/null
++++ b/src/google/protobuf/testing/gtest_main.cc
+@@ -0,0 +1,39 @@
++// Copyright 2006, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++#include <iostream>
++
++#include <gtest/gtest.h>
++
++int main(int argc, char **argv) {
++  std::cout << "Running main() from gtest_main.cc\n";
++
++  testing::InitGoogleTest(&argc, argv);
++  return RUN_ALL_TESTS();
++}

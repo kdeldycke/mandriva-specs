@@ -1,0 +1,3702 @@
+2007-03-13  Gwenole Beauchesne  <gbeauchesne@mandriva.com>
+
+	* Merge in KVM rev 4486. Requires kernel 2.6.17 >= 12mdv.
+
+--- qemu-0.9.0/hw/cirrus_vga.c.kvm	2006-08-18 11:32:04.000000000 +0200
++++ qemu-0.9.0/hw/cirrus_vga.c	2007-03-14 13:22:34.000000000 +0100
+@@ -28,6 +28,9 @@
+  */
+ #include "vl.h"
+ #include "vga_int.h"
++#ifndef _WIN32
++#include <sys/mman.h>
++#endif
+ 
+ /*
+  * TODO:
+@@ -231,6 +234,10 @@ typedef struct CirrusVGAState {
+     int cirrus_linear_io_addr;
+     int cirrus_linear_bitblt_io_addr;
+     int cirrus_mmio_io_addr;
++#ifdef USE_KVM
++    unsigned long cirrus_lfb_addr;
++    unsigned long cirrus_lfb_end;
++#endif
+     uint32_t cirrus_addr_mask;
+     uint32_t linear_mmio_mask;
+     uint8_t cirrus_shadow_gr0;
+@@ -267,6 +274,10 @@ typedef struct CirrusVGAState {
+     int last_hw_cursor_y_end;
+     int real_vram_size; /* XXX: suppress that */
+     CPUWriteMemoryFunc **cirrus_linear_write;
++#ifdef USE_KVM
++    unsigned long map_addr;
++    unsigned long map_end;
++#endif
+ } CirrusVGAState;
+ 
+ typedef struct PCICirrusVGAState {
+@@ -2525,6 +2536,48 @@ static CPUWriteMemoryFunc *cirrus_linear
+     cirrus_linear_bitblt_writel,
+ };
+ 
++#ifdef USE_KVM
++
++#include "qemu-kvm.h"
++
++extern kvm_context_t kvm_context;
++
++static void *set_vram_mapping(unsigned long begin, unsigned long end)
++{
++    void *vram_pointer = NULL;
++
++    /* align begin and end address */
++    begin = begin & TARGET_PAGE_MASK;
++    end = begin + VGA_RAM_SIZE;
++    end = (end + TARGET_PAGE_SIZE -1 ) & TARGET_PAGE_MASK;
++
++    vram_pointer = kvm_create_phys_mem(kvm_context, begin, end - begin, 1, 
++				       1, 1);
++
++    if (vram_pointer == NULL) {
++        printf("set_vram_mapping: cannot allocate memory: %m\n");
++        return NULL;
++    }
++
++    memset(vram_pointer, 0, end - begin);
++
++    return vram_pointer;
++}
++
++static int unset_vram_mapping(unsigned long begin, unsigned long end)
++{
++    /* align begin and end address */
++    end = begin + VGA_RAM_SIZE;
++    begin = begin & TARGET_PAGE_MASK;
++    end = (end + TARGET_PAGE_SIZE -1 ) & TARGET_PAGE_MASK;
++
++    kvm_destroy_phys_mem(kvm_context, begin, end - begin);
++
++    return 0;
++}
++
++#endif
++
+ /* Compute the memory access functions */
+ static void cirrus_update_memory_access(CirrusVGAState *s)
+ {
+@@ -2543,11 +2596,45 @@ static void cirrus_update_memory_access(
+         
+ 	mode = s->gr[0x05] & 0x7;
+ 	if (mode < 4 || mode > 5 || ((s->gr[0x0B] & 0x4) == 0)) {
++#ifdef USE_KVM
++            if (kvm_allowed && s->cirrus_lfb_addr && s->cirrus_lfb_end &&
++		!s->map_addr) {
++                void *vram_pointer, *old_vram;
++
++                vram_pointer = set_vram_mapping(s->cirrus_lfb_addr,
++                                                s->cirrus_lfb_end);
++                if (!vram_pointer)
++                    fprintf(stderr, "NULL vram_pointer\n");
++                else {
++                    old_vram = vga_update_vram((VGAState *)s, vram_pointer,
++                                               VGA_RAM_SIZE);
++                    qemu_free(old_vram);
++                }
++                s->map_addr = s->cirrus_lfb_addr;
++                s->map_end = s->cirrus_lfb_end;
++            }
++#endif
+             s->cirrus_linear_write[0] = cirrus_linear_mem_writeb;
+             s->cirrus_linear_write[1] = cirrus_linear_mem_writew;
+             s->cirrus_linear_write[2] = cirrus_linear_mem_writel;
+         } else {
+         generic_io:
++#ifdef USE_KVM
++            if (kvm_allowed && s->cirrus_lfb_addr && s->cirrus_lfb_end &&
++		s->map_addr) {
++		int error;
++                void *old_vram = NULL;
++
++		error = unset_vram_mapping(s->cirrus_lfb_addr,
++					   s->cirrus_lfb_end);
++		if (!error)
++		    old_vram = vga_update_vram((VGAState *)s, NULL,
++                                               VGA_RAM_SIZE);
++                if (old_vram)
++                    munmap(old_vram, s->map_addr - s->map_end);
++                s->map_addr = s->map_end = 0;
++            }
++#endif
+             s->cirrus_linear_write[0] = cirrus_linear_writeb;
+             s->cirrus_linear_write[1] = cirrus_linear_writew;
+             s->cirrus_linear_write[2] = cirrus_linear_writel;
+@@ -2946,6 +3033,13 @@ static void cirrus_vga_save(QEMUFile *f,
+     qemu_put_be32s(f, &s->hw_cursor_y);
+     /* XXX: we do not save the bitblt state - we assume we do not save
+        the state when the blitter is active */
++
++#ifdef USE_KVM
++    if (kvm_allowed) { /* XXX: KVM images ought to be loadable in QEMU */
++	qemu_put_be32s(f, &s->real_vram_size);
++	qemu_put_buffer(f, s->vram_ptr, s->real_vram_size);
++    }
++#endif
+ }
+ 
+ static int cirrus_vga_load(QEMUFile *f, void *opaque, int version_id)
+@@ -2996,6 +3090,22 @@ static int cirrus_vga_load(QEMUFile *f, 
+     qemu_get_be32s(f, &s->hw_cursor_x);
+     qemu_get_be32s(f, &s->hw_cursor_y);
+ 
++#ifdef USE_KVM
++    if (kvm_allowed) {
++        int real_vram_size;
++        qemu_get_be32s(f, &real_vram_size);
++        if (real_vram_size != s->real_vram_size) {
++            if (real_vram_size > s->real_vram_size)
++                real_vram_size = s->real_vram_size;
++            printf("%s: REAL_VRAM_SIZE MISMATCH !!!!!! SAVED=%d CURRENT=%d", 
++                   __FUNCTION__, real_vram_size, s->real_vram_size);
++        }
++        qemu_get_buffer(f, s->vram_ptr, real_vram_size);
++        cirrus_update_memory_access(s);
++    }
++#endif
++
++
+     /* force refresh */
+     s->graphic_mode = -1;
+     cirrus_update_bank_ptr(s, 0);
+@@ -3151,6 +3261,17 @@ static void cirrus_pci_lfb_map(PCIDevice
+     /* XXX: add byte swapping apertures */
+     cpu_register_physical_memory(addr, s->vram_size,
+ 				 s->cirrus_linear_io_addr);
++#ifdef USE_KVM
++    if (kvm_allowed) {
++	s->cirrus_lfb_addr = addr;
++	s->cirrus_lfb_end = addr + VGA_RAM_SIZE;
++
++	if (s->map_addr && (s->cirrus_lfb_addr != s->map_addr) &&
++	    (s->cirrus_lfb_end != s->map_end))
++	    printf("cirrus vga map change while on lfb mode\n");
++    }
++#endif
++
+     cpu_register_physical_memory(addr + 0x1000000, 0x400000,
+ 				 s->cirrus_linear_bitblt_io_addr);
+ }
+--- qemu-0.9.0/hw/pc.c.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/hw/pc.c	2007-03-14 13:22:34.000000000 +0100
+@@ -22,6 +22,10 @@
+  * THE SOFTWARE.
+  */
+ #include "vl.h"
++#ifdef USE_KVM
++#include "qemu-kvm.h"
++extern int kvm_allowed;
++#endif
+ 
+ /* output Bochs bios info messages */
+ //#define DEBUG_BIOS
+@@ -442,6 +447,11 @@ static void pc_init_ne2k_isa(NICInfo *nd
+     nb_ne2k++;
+ }
+ 
++#ifdef USE_KVM
++extern kvm_context_t kvm_context;
++extern int kvm_allowed;
++#endif
++
+ /* PC hardware initialisation */
+ static void pc_init1(int ram_size, int vga_ram_size, int boot_device,
+                      DisplayState *ds, const char **fd_filename, int snapshot,
+@@ -519,6 +534,11 @@ static void pc_init1(int ram_size, int v
+     /* setup basic memory access */
+     cpu_register_physical_memory(0xc0000, 0x10000, 
+                                  vga_bios_offset | IO_MEM_ROM);
++#ifdef USE_KVM
++    if (kvm_allowed)
++	    memcpy(phys_ram_base + 0xc0000, phys_ram_base + vga_bios_offset,
++		   0x10000);
++#endif
+ 
+     /* map the last 128KB of the BIOS in ISA space */
+     isa_bios_size = bios_size;
+@@ -530,6 +550,26 @@ static void pc_init1(int ram_size, int v
+                                  isa_bios_size, 
+                                  (bios_offset + bios_size - isa_bios_size) | IO_MEM_ROM);
+ 
++#ifdef USE_KVM
++    if (kvm_allowed)
++	    memcpy(phys_ram_base + 0x100000 - isa_bios_size,
++		   phys_ram_base + (bios_offset + bios_size - isa_bios_size),
++		   isa_bios_size);
++#endif
++
++#ifdef USE_KVM
++    if (kvm_allowed) {
++	    bios_mem = kvm_create_phys_mem(kvm_context, (uint32_t)(-bios_size),
++					   bios_size, 2, 0, 1);
++	    if (!bios_mem)
++		    exit(1);
++	    memcpy(bios_mem, phys_ram_base + bios_offset, bios_size);
++
++	    cpu_register_physical_memory(phys_ram_size - KVM_EXTRA_PAGES * 4096, KVM_EXTRA_PAGES * 4096,
++					 (phys_ram_size - KVM_EXTRA_PAGES * 4096) | IO_MEM_ROM);
++    }
++#endif
++    
+     {
+         ram_addr_t option_rom_offset;
+         int size, offset;
+@@ -718,6 +758,11 @@ static void pc_init1(int ram_size, int v
+         }
+     }
+ 
++#ifdef USE_KVM
++    if (kvm_allowed) {
++        pci_hypercall_init(pci_bus);
++	}
++#endif
+     if (pci_enabled) {
+         pci_piix3_ide_init(pci_bus, bs_table, piix3_devfn + 1);
+     } else {
+--- qemu-0.9.0/hw/vga.c.kvm	2006-09-25 23:41:20.000000000 +0200
++++ qemu-0.9.0/hw/vga.c	2007-03-14 13:22:34.000000000 +0100
+@@ -1373,6 +1373,26 @@ void vga_invalidate_scanlines(VGAState *
+     }
+ }
+ 
++#ifdef USE_KVM
++
++#include "kvmctl.h"
++extern kvm_context_t kvm_context;
++
++static int bitmap_get_dirty(unsigned long *bitmap, unsigned nr)
++{
++    unsigned word = nr / ((sizeof bitmap[0]) * 8);
++    unsigned bit = nr % ((sizeof bitmap[0]) * 8);
++
++    //printf("%x -> %ld\n", nr, (bitmap[word] >> bit) & 1);
++    return (bitmap[word] >> bit) & 1;
++}
++
++#endif
++
++#ifdef USE_KVM
++extern int kvm_allowed;
++#endif
++
+ /* 
+  * graphic modes
+  */
+@@ -1385,6 +1405,20 @@ static void vga_draw_graphic(VGAState *s
+     uint32_t v, addr1, addr;
+     vga_draw_line_func *vga_draw_line;
+     
++#ifdef USE_KVM
++
++    /* HACK ALERT */
++#define BITMAP_SIZE ((8*1024*1024) / 4096 / 8 / sizeof(long))
++    unsigned long bitmap[BITMAP_SIZE];
++    int r;
++
++    if (kvm_allowed) {
++	    r = kvm_get_dirty_pages(kvm_context, 1, &bitmap);
++	    if (r < 0)
++		    fprintf(stderr, "kvm: get_dirty_pages returned %d\n", r);
++    }
++#endif
++
+     full_update |= update_basic_params(s);
+ 
+     s->get_resolution(s, &width, &height);
+@@ -1491,10 +1525,20 @@ static void vga_draw_graphic(VGAState *s
+         update = full_update | 
+             cpu_physical_memory_get_dirty(page0, VGA_DIRTY_FLAG) |
+             cpu_physical_memory_get_dirty(page1, VGA_DIRTY_FLAG);
++#ifdef USE_KVM
++	if (kvm_allowed) {
++		update |= bitmap_get_dirty(bitmap, (page0 - s->vram_offset) >> TARGET_PAGE_BITS);
++		update |= bitmap_get_dirty(bitmap, (page1 - s->vram_offset) >> TARGET_PAGE_BITS);
++	}
++#endif
+         if ((page1 - page0) > TARGET_PAGE_SIZE) {
+             /* if wide line, can use another page */
+             update |= cpu_physical_memory_get_dirty(page0 + TARGET_PAGE_SIZE, 
+                                                     VGA_DIRTY_FLAG);
++#ifdef USE_KVM
++	    if (kvm_allowed)
++		    update |= bitmap_get_dirty(bitmap, (page0 - s->vram_offset) >> TARGET_PAGE_BITS);
++#endif
+         }
+         /* explicit invalidation for the hardware cursor */
+         update |= (s->invalidated_y_table[y >> 5] >> (y & 0x1f)) & 1;
+@@ -1751,6 +1795,7 @@ static void vga_map(PCIDevice *pci_dev, 
+     }
+ }
+ 
++/* when used on xen/kvm environment, the vga_ram_base is not used */
+ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base, 
+                      unsigned long vga_ram_offset, int vga_ram_size)
+ {
+@@ -1781,7 +1826,14 @@ void vga_common_init(VGAState *s, Displa
+ 
+     vga_reset(s);
+ 
++#ifndef USE_KVM
+     s->vram_ptr = vga_ram_base;
++#else
++    if (kvm_allowed)
++	    s->vram_ptr = qemu_malloc(vga_ram_size);
++    else
++	    s->vram_ptr = vga_ram_base;
++#endif
+     s->vram_offset = vga_ram_offset;
+     s->vram_size = vga_ram_size;
+     s->ds = ds;
+@@ -1909,6 +1961,31 @@ int pci_vga_init(PCIBus *bus, DisplaySta
+     return 0;
+ }
+ 
++void *vga_update_vram(VGAState *s, void *vga_ram_base, int vga_ram_size)
++{
++    uint8_t *old_pointer;
++
++    if (s->vram_size != vga_ram_size) {
++        fprintf(stderr, "No support to change vga_ram_size\n");
++        return NULL;
++    }
++
++    if (!vga_ram_base) {
++        vga_ram_base = qemu_malloc(vga_ram_size);
++        if (!vga_ram_base) {
++            fprintf(stderr, "reallocate error\n");
++            return NULL;
++        }
++    }
++
++    /* XXX lock needed? */
++    memcpy(vga_ram_base, s->vram_ptr, vga_ram_size);
++    old_pointer = s->vram_ptr;
++    s->vram_ptr = vga_ram_base;
++
++    return old_pointer;
++}
++
+ /********************************************************/
+ /* vga screen dump */
+ 
+--- qemu-0.9.0/hw/vga_int.h.kvm	2006-09-21 23:46:53.000000000 +0200
++++ qemu-0.9.0/hw/vga_int.h	2007-03-14 13:22:34.000000000 +0100
+@@ -174,5 +174,6 @@ void vga_draw_cursor_line_32(uint8_t *d1
+                              unsigned int color0, unsigned int color1,
+                              unsigned int color_xor);
+ 
++void *vga_update_vram(VGAState *s, void *vga_ram_base, int vga_ram_size);
+ extern const uint8_t sr_mask[8];
+ extern const uint8_t gr_mask[16];
+--- qemu-0.9.0/hw/hypercall.c.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/hw/hypercall.c	2007-03-14 13:22:34.000000000 +0100
+@@ -0,0 +1,302 @@
++/*
++ * QEMU-KVM Hypercall emulation
++ * 
++ * Copyright (c) 2003-2004 Fabrice Bellard
++ * Copyright (c) 2006 Qumranet
++ * 
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++#include "vl.h"
++#include "hypercall.h"
++#include <stddef.h>
++
++int use_hypercall_dev = 0;
++
++typedef struct VmChannelCharDriverState {
++    CharDriverState *vmchannel_hd;
++    uint32_t deviceid;
++} VmChannelCharDriverState;
++
++static VmChannelCharDriverState vmchannel_hds[MAX_VMCHANNEL_DEVICES];
++
++typedef struct HypercallState {
++    uint32_t hcr;
++    uint32_t hsr;
++    uint32_t txsize;
++    uint32_t txbuff;
++    uint32_t rxsize;
++    uint8_t  RxBuff[HP_MEM_SIZE];
++    uint8_t  txbufferaccu[HP_MEM_SIZE];
++    int      txbufferaccu_offset;
++    int      irq;
++    PCIDevice *pci_dev;
++    uint32_t index;
++} HypercallState;
++
++HypercallState *pHypercallStates[MAX_VMCHANNEL_DEVICES] = {NULL};
++
++//#define HYPERCALL_DEBUG 1
++
++static void hp_reset(HypercallState *s)
++{
++    s->hcr = 0;
++    s->hsr = 0;
++    s->txsize = 0;
++    s->txbuff = 0;
++    s->rxsize= 0;
++    s->txbufferaccu_offset = 0;
++}
++
++static void hypercall_update_irq(HypercallState *s);
++
++
++static void hp_ioport_write(void *opaque, uint32_t addr, uint32_t val)
++{
++    HypercallState *s = opaque;
++
++#ifdef HYPERCALL_DEBUG
++    printf("%s: addr=0x%x, val=0x%x\n", __FUNCTION__, addr, val);
++#endif
++    addr &= 0xff;
++
++    switch(addr)
++    {
++        case HCR_REGISTER:
++        {
++            s->hcr = val;
++	    if (s->hcr & HCR_DI)
++                hypercall_update_irq(s);
++            if (val & HCR_GRS){
++                hp_reset(s);
++            }
++            break;
++        }
++
++        case HP_TXSIZE:
++        {
++            // handle the case when the we are being called when txsize is not 0
++            if (s->txsize != 0) {
++                printf("txsize is being set, but txsize is not 0!!!\n");
++            }
++            if (val > HP_MEM_SIZE) {
++                printf("txsize is larger than allowed by hw!!!\n");
++            }
++            s->txsize = val;
++            s->txbufferaccu_offset = 0;
++            break;
++        }
++
++        case HP_TXBUFF:
++        {
++            if (s->txsize == 0) {
++                printf("error with txbuff!!!\n");
++                break;
++            }
++
++            s->txbufferaccu[s->txbufferaccu_offset] = val;
++            s->txbufferaccu_offset++;
++            if (s->txbufferaccu_offset >= s->txsize) {
++                qemu_chr_write(vmchannel_hds[s->index].vmchannel_hd, s->txbufferaccu, s->txsize);
++                s->txbufferaccu_offset = 0;
++                s->txsize = 0;
++            }
++            break;
++        }
++        default:
++        {
++            printf("hp_ioport_write to unhandled address!!!\n");
++        }
++    }
++}
++
++static uint32_t hp_ioport_read(void *opaque, uint32_t addr)
++{
++    HypercallState *s = opaque;
++    int ret;
++
++    addr &= 0xff;
++#ifdef HYPERCALL_DEBUG
++    // Since HSR_REGISTER is being repeatedly read in the guest ISR we don't print it
++    if (addr != HSR_REGISTER)
++        printf("%s: addr=0x%x\n", __FUNCTION__, addr);
++#endif
++
++    if (addr >= offsetof(HypercallState, RxBuff) )
++    {
++        int RxBuffOffset = addr - (offsetof(HypercallState, RxBuff));
++        ret = s->RxBuff[RxBuffOffset];
++        return ret;
++    }
++
++    switch (addr)
++    {
++    case HSR_REGISTER:
++        ret = s->hsr;
++        if (ret & HSR_VDR) {
++            s->hsr &= ~HSR_VDR;
++        }
++        break;
++    case HP_RXSIZE:
++        ret = s->rxsize;
++        break;
++
++    default:
++        ret = 0x00;
++        break;
++    }
++
++    return ret;
++}
++
++/***********************************************************/
++/* PCI Hypercall definitions */
++
++typedef struct PCIHypercallState {
++    PCIDevice dev;
++    HypercallState hp;
++} PCIHypercallState;
++
++static void hp_map(PCIDevice *pci_dev, int region_num, 
++                       uint32_t addr, uint32_t size, int type)
++{
++    PCIHypercallState *d = (PCIHypercallState *)pci_dev;
++    HypercallState *s = &d->hp;
++
++    register_ioport_write(addr, 0x100, 1, hp_ioport_write, s);
++    register_ioport_read(addr, 0x100, 1, hp_ioport_read, s);
++
++}
++
++
++static void hypercall_update_irq(HypercallState *s)
++{
++    /* PCI irq */
++    pci_set_irq(s->pci_dev, 0, !(s->hcr & HCR_DI));
++}
++
++void pci_hypercall_single_init(PCIBus *bus, uint32_t deviceid, uint32_t index)
++{
++    PCIHypercallState *d;
++    HypercallState *s;
++    uint8_t *pci_conf;
++    char name[sizeof("HypercallX")];
++
++#ifdef HYPERCALL_DEBUG
++    printf("%s\n", __FUNCTION__);
++#endif
++
++    // If the vmchannel wasn't initialized, we don't want the Hypercall device in the guest
++    if (use_hypercall_dev == 0) {
++        return;
++    }
++
++    d = (PCIHypercallState *)pci_register_device(bus,
++                                                 name, sizeof(PCIHypercallState),
++                                                 -1,
++                                                 NULL, NULL);
++
++    pci_conf = d->dev.config;
++    pci_conf[0x00] = 0x02; // Qumranet vendor ID 0x5002
++    pci_conf[0x01] = 0x50;
++    pci_conf[0x02] = deviceid & 0x00ff;
++    pci_conf[0x03] = (deviceid & 0xff00) >> 8;
++
++    pci_conf[0x09] = 0x00; // ProgIf
++    pci_conf[0x0a] = 0x00; // SubClass
++    pci_conf[0x0b] = 0x05; // BaseClass
++
++    pci_conf[0x0e] = 0x00; // header_type
++    pci_conf[0x3d] = 1; // interrupt pin 0
++
++    pci_register_io_region(&d->dev, 0, 0x100,
++                           PCI_ADDRESS_SPACE_IO, hp_map);
++    s = &d->hp;
++    pHypercallStates[index] = s;
++    s->index = index;
++    s->irq = 16; /* PCI interrupt */
++    s->pci_dev = (PCIDevice *)d;
++
++    hp_reset(s);
++}
++
++void pci_hypercall_init(PCIBus *bus)
++{
++    int i;
++
++    // loop devices & call pci_hypercall_single_init with device id's
++    for(i = 0; i < MAX_VMCHANNEL_DEVICES; i++){
++        if (vmchannel_hds[i].vmchannel_hd) {
++            pci_hypercall_single_init(bus, vmchannel_hds[i].deviceid, i);
++        }
++    }
++}
++
++static int vmchannel_can_read(void *opaque)
++{
++    return 128;
++}
++
++static void vmchannel_event(void *opaque, int event)
++{
++
++#ifdef HYPERCALL_DEBUG
++    // if index is to be used outside the printf, take it out of the #ifdef block!
++    long index = (long)opaque;
++    printf("%s index:%ld, got event %i\n", __FUNCTION__, index, event);
++#endif
++    
++    return;
++}
++
++// input from vmchannel outside caller
++static void vmchannel_read(void *opaque, const uint8_t *buf, int size)
++{
++    int i;
++    long index = (long)opaque;
++
++#ifdef HYPERCALL_DEBUG    
++    printf("vmchannel_read buf size:%d\n", size);
++#endif
++
++    // if the hypercall device is in interrupts disabled state, don't accept the data
++    if (pHypercallStates[index]->hcr & HCR_DI) {
++        return;
++    }
++
++    for(i = 0; i < size; i++) {
++        pHypercallStates[index]->RxBuff[i] = buf[i];
++    }
++    pHypercallStates[index]->rxsize = size;
++    pHypercallStates[index]->hsr = HSR_VDR;
++    hypercall_update_irq(pHypercallStates[index]);
++}
++
++void vmchannel_init(CharDriverState *hd, uint32_t deviceid, uint32_t index)
++{
++#ifdef HYPERCALL_DEBUG
++    printf("vmchannel_init, index=%d, deviceid=0x%x\n", index, deviceid);
++#endif
++
++    vmchannel_hds[index].deviceid = deviceid;
++    vmchannel_hds[index].vmchannel_hd = hd;
++   
++    use_hypercall_dev = 1;
++    qemu_chr_add_handlers(vmchannel_hds[index].vmchannel_hd, vmchannel_can_read, vmchannel_read,
++                          vmchannel_event, (void *)(long)index);
++}
+--- qemu-0.9.0/hw/hypercall.h.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/hw/hypercall.h	2007-03-14 13:22:34.000000000 +0100
+@@ -0,0 +1,45 @@
++/*
++ * QEMU-KVM Hypercall emulation
++ * 
++ * Copyright (c) 2003-2004 Fabrice Bellard
++ * Copyright (c) 2006 Qumranet
++ * 
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++#define HCR_REGISTER    0x00  // Hypercall Command Register WR
++#define HSR_REGISTER    0x04  // Hypercall Status Register RD
++#define HP_TXSIZE       0x08
++#define HP_TXBUFF       0x0c
++#define HP_RXSIZE       0x10
++#define HP_RXBUFF       0x14
++
++// HCR_REGISTER commands
++#define HCR_DI		1 // disable interrupts
++#define HCR_EI		2 // enable interrupts
++#define HCR_GRS		4 // Global reset
++#define HCR_RESET	(HCR_GRS|HCR_DI)
++
++
++// Bits in HSR_REGISTER
++#define HSR_VDR		0x01  // vmchannel Data is ready to be read
++
++#define HP_MEM_SIZE    0xE0
++
++
+--- qemu-0.9.0/target-i386/cpu.h.kvm	2007-02-06 10:17:08.000000000 +0100
++++ qemu-0.9.0/target-i386/cpu.h	2007-03-14 13:22:34.000000000 +0100
+@@ -161,12 +161,17 @@
+ #define HF_MP_MASK           (1 << HF_MP_SHIFT)
+ #define HF_EM_MASK           (1 << HF_EM_SHIFT)
+ #define HF_TS_MASK           (1 << HF_TS_SHIFT)
++#define HF_IOPL_MASK         (3 << HF_IOPL_SHIFT)
+ #define HF_LMA_MASK          (1 << HF_LMA_SHIFT)
+ #define HF_CS64_MASK         (1 << HF_CS64_SHIFT)
+ #define HF_OSFXSR_MASK       (1 << HF_OSFXSR_SHIFT)
++#define HF_VM_MASK           (1 << HF_VM_SHIFT)
+ #define HF_HALTED_MASK       (1 << HF_HALTED_SHIFT)
+ #define HF_SMM_MASK          (1 << HF_SMM_SHIFT)
+ 
++#define CR0_PE_SHIFT 0
++#define CR0_MP_SHIFT 1
++
+ #define CR0_PE_MASK  (1 << 0)
+ #define CR0_MP_MASK  (1 << 1)
+ #define CR0_EM_MASK  (1 << 2)
+@@ -185,7 +190,8 @@
+ #define CR4_PAE_MASK  (1 << 5)
+ #define CR4_PGE_MASK  (1 << 7)
+ #define CR4_PCE_MASK  (1 << 8)
+-#define CR4_OSFXSR_MASK (1 << 9)
++#define CR4_OSFXSR_SHIFT 9
++#define CR4_OSFXSR_MASK (1 << CR4_OSFXSR_SHIFT)
+ #define CR4_OSXMMEXCPT_MASK  (1 << 10)
+ 
+ #define PG_PRESENT_BIT	0
+@@ -496,6 +502,10 @@ typedef struct CPUX86State {
+     target_ulong kernelgsbase;
+ #endif
+ 
++#ifdef USE_KVM
++    uint64_t tsc; /* time stamp counter */
++    uint8_t ready_for_interrupt_injection;
++#endif
+     uint64_t pat;
+ 
+     /* temporary data for USE_CODE_COPY mode */
+@@ -534,6 +544,13 @@ typedef struct CPUX86State {
+     int kqemu_enabled;
+     int last_io_time;
+ #endif
++
++#ifdef USE_KVM
++#define BITS_PER_LONG (8 * sizeof (long))
++#define NR_IRQ_WORDS (256/ BITS_PER_LONG)
++    unsigned long kvm_interrupt_bitmap[NR_IRQ_WORDS];
++#endif
++
+     /* in order to simplify APIC support, we leave this pointer to the
+        user */
+     struct APICState *apic_state;
+--- qemu-0.9.0/target-i386/helper.c.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/target-i386/helper.c	2007-03-14 13:22:34.000000000 +0100
+@@ -18,7 +18,9 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  */
+ #include "exec.h"
+-
++#ifdef USE_KVM
++extern int kvm_allowed;
++#endif
+ //#define DEBUG_PCALL
+ 
+ #if 0
+@@ -839,6 +841,13 @@ static void do_interrupt64(int intno, in
+     uint32_t e1, e2, e3, ss;
+     target_ulong old_eip, esp, offset;
+ 
++#ifdef USE_KVM
++    if (kvm_allowed) {
++	    printf("%s: unexpect\n", __FUNCTION__);
++	    exit(-1);
++    }
++#endif
++
+     has_error_code = 0;
+     if (!is_int && !is_hw) {
+         switch(intno) {
+@@ -1122,6 +1131,12 @@ void do_interrupt_user(int intno, int is
+     int dpl, cpl;
+     uint32_t e2;
+ 
++#ifdef USE_KVM
++    if (kvm_allowed) {
++	    printf("%s: unexpect\n", __FUNCTION__);
++	    exit(-1);
++    }
++#endif
+     dt = &env->idt;
+     ptr = dt->base + (intno * 8);
+     e2 = ldl_kernel(ptr + 4);
+@@ -1147,6 +1162,12 @@ void do_interrupt_user(int intno, int is
+ void do_interrupt(int intno, int is_int, int error_code, 
+                   target_ulong next_eip, int is_hw)
+ {
++#ifdef USE_KVM
++    if (kvm_allowed) {
++	printf("%s: unexpect\n", __FUNCTION__);
++	exit(-1);
++    }
++#endif
+     if (loglevel & CPU_LOG_INT) {
+         if ((env->cr[0] & CR0_PE_MASK)) {
+             static int count;
+@@ -1958,6 +1979,12 @@ void helper_ljmp_protected_T0_T1(int nex
+         cpu_x86_load_seg_cache(env, R_CS, (new_cs & 0xfffc) | cpl,
+                        get_seg_base(e1, e2), limit, e2);
+         EIP = new_eip;
++#ifdef USE_KVM
++        if (kvm_allowed && (e2 & DESC_L_MASK)) {
++            env->exception_index = -1;
++            cpu_loop_exit();   
++        }       
++#endif
+     } else {
+         /* jump to call or task gate */
+         dpl = (e2 >> DESC_DPL_SHIFT) & 3;
+--- qemu-0.9.0/target-i386/helper2.c.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/target-i386/helper2.c	2007-03-14 13:22:34.000000000 +0100
+@@ -144,6 +144,9 @@ CPUX86State *cpu_x86_init(void)
+ #ifdef USE_KQEMU
+     kqemu_init(env);
+ #endif
++#ifdef USE_KVM
++    env->ready_for_interrupt_injection = 1;
++#endif
+     return env;
+ }
+ 
+--- qemu-0.9.0/Makefile.target.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/Makefile.target	2007-03-14 13:22:34.000000000 +0100
+@@ -1,5 +1,9 @@
++CFLAGS=
++LDFLAGS=
++
+ include config.mak
+ 
++LDFLAGS_BASE:=$(LDFLAGS)
+ TARGET_BASE_ARCH:=$(TARGET_ARCH)
+ ifeq ($(TARGET_ARCH), x86_64)
+ TARGET_BASE_ARCH:=i386
+@@ -231,8 +235,8 @@ SRCS:= $(OBJS:.o=.c)
+ OBJS+= libqemu.a
+ 
+ # cpu emulator library
+-LIBOBJS=exec.o kqemu.o translate-op.o translate-all.o cpu-exec.o\
+-        translate.o op.o 
++LIBOBJS=exec.o kqemu.o qemu-kvm.o translate-op.o translate-all.o cpu-exec.o\
++        translate.o op.o
+ ifdef CONFIG_SOFTFLOAT
+ LIBOBJS+=fpu/softfloat.o
+ else
+@@ -369,6 +373,13 @@ VL_OBJS+= usb.o usb-hub.o usb-linux.o us
+ # PCI network cards
+ VL_OBJS+= ne2000.o rtl8139.o pcnet.o
+ 
++# KVM layer
++ifeq ($(USE_KVM), yes)
++VL_OBJS+= kvmctl.o
++# PCI Hypercall
++VL_OBJS+= hypercall.o
++endif
++
+ ifeq ($(TARGET_BASE_ARCH), i386)
+ # Hardware support
+ VL_OBJS+= ide.o pckbd.o ps2.o vga.o $(SOUND_HW) dma.o $(AUDIODRV)
+@@ -433,7 +444,7 @@ tcp_subr.o tcp_timer.o udp.o bootp.o deb
+ VL_OBJS+=$(addprefix slirp/, $(SLIRP_OBJS))
+ endif
+ 
+-VL_LDFLAGS=
++VL_LDFLAGS=$(LDFLAGS_BASE)
+ # specific flags are needed for non soft mmu emulator
+ ifdef CONFIG_STATIC
+ VL_LDFLAGS+=-static
+@@ -444,7 +455,7 @@ endif
+ ifndef CONFIG_DARWIN
+ ifndef CONFIG_WIN32
+ ifndef CONFIG_SOLARIS
+-VL_LIBS=-lutil -lrt
++VL_LIBS=-lutil -lrt -luuid
+ endif
+ endif
+ endif
+@@ -466,7 +477,7 @@ ifdef CONFIG_WIN32
+ SDL_LIBS := $(filter-out -mwindows, $(SDL_LIBS)) -mconsole
+ endif
+ 
+-$(QEMU_SYSTEM): $(VL_OBJS) libqemu.a
++$(QEMU_SYSTEM): $(VL_OBJS) libqemu.a $(DEPLIBS)
+ 	$(CC) $(VL_LDFLAGS) -o $@ $^ $(LIBS) $(SDL_LIBS) $(COCOA_LIBS) $(VL_LIBS)
+ 
+ cocoa.o: cocoa.m
+@@ -525,6 +536,9 @@ endif
+ cpu-exec.o: cpu-exec.c
+ 	$(CC) $(HELPER_CFLAGS) $(CPPFLAGS) $(BASE_CFLAGS) -c -o $@ $<
+ 
++qemu-kvm.o: qemu-kvm.c
++	$(CC) $(HELPER_CFLAGS) $(CPPFLAGS) $(BASE_CFLAGS) -c -o $@ $<
++
+ # Note: this is a workaround. The real fix is to avoid compiling
+ # cpu_signal_handler() in cpu-exec.c.
+ signal.o: signal.c
+--- qemu-0.9.0/configure.kvm	2007-02-13 14:41:12.000000000 +0100
++++ qemu-0.9.0/configure	2007-03-14 13:22:34.000000000 +0100
+@@ -89,7 +89,9 @@ fmod_inc=""
+ bsd="no"
+ linux="no"
+ kqemu="no"
++kvm="no"
+ profiler="no"
++kernel_path=""
+ cocoa="no"
+ check_gfx="yes"
+ check_gcc="yes"
+@@ -114,6 +116,7 @@ bsd="yes"
+ oss="yes"
+ if [ "$cpu" = "i386" -o "$cpu" = "x86_64" ] ; then
+     kqemu="yes"
++    kvm="yes"
+ fi
+ ;;
+ NetBSD)
+@@ -149,6 +152,7 @@ linux="yes"
+ linux_user="yes"
+ if [ "$cpu" = "i386" -o "$cpu" = "x86_64" ] ; then
+     kqemu="yes"
++    kvm="yes"
+ fi
+ ;;
+ esac
+@@ -229,8 +233,12 @@ for opt do
+   ;;
+   --disable-kqemu) kqemu="no"
+   ;;
++  --enable-kvm) kvm="yes"
++  ;;
+   --enable-profiler) profiler="yes"
+   ;;
++  --kernel-path=*) kernel_path="$optarg"
++  ;;
+   --enable-cocoa) cocoa="yes" ; coreaudio="yes" ; sdl="no"
+   ;;
+   --disable-gfx-check) check_gfx="no"
+@@ -274,6 +282,8 @@ echo "  --target-list=LIST       set tar
+ echo ""
+ echo "kqemu kernel acceleration support:"
+ echo "  --disable-kqemu          disable kqemu support"
++echo "  --kernel-path=PATH       set the kernel path (configure probes it)"
++echo "  --enable-kvm             enable kernel virtual machine support"
+ echo ""
+ echo "Advanced options (experts only):"
+ echo "  --source-path=PATH       path of source code [$source_path]"
+@@ -620,6 +630,7 @@ else
+ fi
+ echo "FMOD support      $fmod $fmod_support"
+ echo "kqemu support     $kqemu"
++echo "kvm support       $kvm"
+ echo "Documentation     $build_docs"
+ [ ! -z "$uname_release" ] && \
+ echo "uname -r          $uname_release"
+@@ -854,6 +865,13 @@ bflt="no"
+ interp_prefix1=`echo "$interp_prefix" | sed "s/%M/$target_cpu/g"`
+ echo "#define CONFIG_QEMU_PREFIX \"$interp_prefix1\"" >> $config_h
+ 
++configure_kvm() {
++  if test $kvm = "yes" -a "$target_softmmu" = "yes" -a $cpu = "$target_cpu" ; then
++    echo "#define USE_KVM 1" >> $config_h
++    echo "USE_KVM=yes" >> $config_mak
++  fi
++}
++
+ if test "$target_cpu" = "i386" ; then
+   echo "TARGET_ARCH=i386" >> $config_mak
+   echo "#define TARGET_ARCH \"i386\"" >> $config_h
+@@ -861,6 +879,7 @@ if test "$target_cpu" = "i386" ; then
+   if test $kqemu = "yes" -a "$target_softmmu" = "yes" -a $cpu = "i386" ; then
+     echo "#define USE_KQEMU 1" >> $config_h
+   fi
++  configure_kvm
+ elif test "$target_cpu" = "arm" -o "$target_cpu" = "armeb" ; then
+   echo "TARGET_ARCH=arm" >> $config_mak
+   echo "#define TARGET_ARCH \"arm\"" >> $config_h
+@@ -892,6 +911,7 @@ elif test "$target_cpu" = "x86_64" ; the
+   if test $kqemu = "yes" -a "$target_softmmu" = "yes" -a $cpu = "x86_64"  ; then
+     echo "#define USE_KQEMU 1" >> $config_h
+   fi
++  configure_kvm
+ elif test "$target_cpu" = "mips" -o "$target_cpu" = "mipsel" ; then
+   echo "TARGET_ARCH=mips" >> $config_mak
+   echo "#define TARGET_ARCH \"mips\"" >> $config_h
+--- qemu-0.9.0/cpu-all.h.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/cpu-all.h	2007-03-14 13:22:34.000000000 +0100
+@@ -834,6 +834,7 @@ extern int phys_ram_size;
+ extern int phys_ram_fd;
+ extern uint8_t *phys_ram_base;
+ extern uint8_t *phys_ram_dirty;
++extern uint8_t *bios_mem;
+ 
+ /* physical memory access */
+ #define TLB_INVALID_MASK   (1 << 3)
+--- qemu-0.9.0/cpu-exec.c.kvm	2007-02-06 10:17:07.000000000 +0100
++++ qemu-0.9.0/cpu-exec.c	2007-03-14 13:22:34.000000000 +0100
+@@ -35,6 +35,11 @@
+ #include <sys/ucontext.h>
+ #endif
+ 
++#ifdef USE_KVM
++#include "qemu-kvm.h"
++extern int kvm_allowed;
++#endif
++
+ int tb_invalidated_flag;
+ 
+ //#define DEBUG_EXEC
+@@ -401,6 +406,12 @@ int cpu_exec(CPUState *env1)
+             }
+ #endif
+ 
++#ifdef USE_KVM
++            if (kvm_allowed) {
++                kvm_cpu_exec(env);
++                longjmp(env->jmp_env, 1);
++            }
++#endif
+             T0 = 0; /* force lookup of first TB */
+             for(;;) {
+ #if defined(__sparc__) && !defined(HOST_SOLARIS)
+--- qemu-0.9.0/exec.c.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/exec.c	2007-03-14 13:22:34.000000000 +0100
+@@ -69,6 +69,10 @@
+ #define TARGET_PHYS_ADDR_SPACE_BITS 32
+ #endif
+ 
++#ifdef USE_KVM
++extern int kvm_allowed;
++#endif
++
+ TranslationBlock tbs[CODE_GEN_MAX_BLOCKS];
+ TranslationBlock *tb_phys_hash[CODE_GEN_PHYS_HASH_SIZE];
+ int nb_tbs;
+@@ -83,6 +87,7 @@ int phys_ram_fd;
+ uint8_t *phys_ram_base;
+ uint8_t *phys_ram_dirty;
+ static ram_addr_t phys_ram_alloc_offset = 0;
++uint8_t *bios_mem;
+ static int in_migration;
+ 
+ CPUState *first_cpu;
+@@ -1045,6 +1050,11 @@ int cpu_breakpoint_insert(CPUState *env,
+     if (env->nb_breakpoints >= MAX_BREAKPOINTS)
+         return -1;
+     env->breakpoints[env->nb_breakpoints++] = pc;
++
++#ifdef USE_KVM
++    if (kvm_allowed)
++	kvm_update_debugger(env);
++#endif
+     
+     breakpoint_invalidate(env, pc);
+     return 0;
+@@ -1068,6 +1078,11 @@ int cpu_breakpoint_remove(CPUState *env,
+     if (i < env->nb_breakpoints)
+       env->breakpoints[i] = env->breakpoints[env->nb_breakpoints];
+ 
++#ifdef USE_KVM
++    if (kvm_allowed)
++	kvm_update_debugger(env);
++#endif
++    
+     breakpoint_invalidate(env, pc);
+     return 0;
+ #else
+@@ -1086,6 +1101,10 @@ void cpu_single_step(CPUState *env, int 
+         /* XXX: only flush what is necessary */
+         tb_flush(env);
+     }
++#ifdef USE_KVM
++    if (kvm_allowed)
++	kvm_update_debugger(env);
++#endif
+ #endif
+ }
+ 
+@@ -1426,6 +1445,9 @@ int cpu_physical_memory_set_dirty_tracki
+ {
+     int r=0;
+ 
++#ifdef USE_KVM
++    r = kvm_physical_memory_set_dirty_tracking(enable);
++#endif
+     in_migration = enable;
+     return r;
+ }
+--- qemu-0.9.0/migration.c.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/migration.c	2007-03-14 13:22:34.000000000 +0100
+@@ -24,6 +24,9 @@
+ 
+ #include "vl.h"
+ #include "qemu_socket.h"
++#ifdef USE_KVM
++#include "qemu-kvm.h"
++#endif
+ 
+ #include <sys/wait.h>
+ 
+@@ -172,6 +175,10 @@ static int migrate_check_convergence(Mig
+     int dirty_count = 0;
+ 
+     for (addr = 0; addr < phys_ram_size; addr += TARGET_PAGE_SIZE) {
++#ifdef USE_KVM
++        if (kvm_allowed && (addr>=0xa0000) && (addr<0xc0000)) /* do not access video-addresses */
++            continue;
++#endif
+ 	if (cpu_physical_memory_get_dirty(addr, MIGRATION_DIRTY_FLAG))
+ 	    dirty_count++;
+     }
+@@ -186,6 +193,11 @@ static void migrate_write(void *opaque)
+     if (migrate_write_buffer(s))
+ 	return;
+ 
++#ifdef USE_KVM
++    if (kvm_allowed && !*s->has_error)
++        *s->has_error = kvm_update_dirty_pages_log();
++#endif
++
+     if (migrate_check_convergence(s) || *s->has_error) {
+ 	qemu_del_timer(s->timer);
+ 	qemu_free_timer(s->timer);
+@@ -195,6 +207,11 @@ static void migrate_write(void *opaque)
+     }	
+ 
+     while (s->addr < phys_ram_size) {
++#ifdef USE_KVM
++        if (kvm_allowed && (s->addr>=0xa0000) && (s->addr<0xc0000)) /* do not access video-addresses */
++            s->addr = 0xc0000;
++#endif
++
+ 	if (cpu_physical_memory_get_dirty(s->addr, MIGRATION_DIRTY_FLAG)) {
+ 	    uint32_t value = cpu_to_be32(s->addr);
+ 
+@@ -254,6 +271,10 @@ static int start_migration(MigrationStat
+     fcntl(s->fd, F_SETFL, O_NONBLOCK);
+ 
+     for (addr = 0; addr < phys_ram_size; addr += TARGET_PAGE_SIZE) {
++#ifdef USE_KVM
++        if (kvm_allowed && (addr>=0xa0000) && (addr<0xc0000)) /* do not access video-addresses */
++            continue;
++#endif
+ 	if (!cpu_physical_memory_get_dirty(addr, MIGRATION_DIRTY_FLAG))
+ 	    cpu_physical_memory_set_dirty(addr);
+     }
+@@ -723,6 +744,10 @@ static int save_verify_memory(QEMUFile *
+     unsigned int sum;
+ 
+     for (addr = 0; addr < phys_ram_size; addr += TARGET_PAGE_SIZE) {
++#ifdef USE_KVM
++        if (kvm_allowed && (addr>=0xa0000) && (addr<0xc0000)) /* do not access video-addresses */
++            continue;
++#endif
+         sum = calc_page_checksum(addr);
+         qemu_put_be32(f, addr);
+         qemu_put_be32(f, sum);
+@@ -737,6 +762,10 @@ static int load_verify_memory(QEMUFile *
+     int num_errors = 0;
+     
+     for (addr = 0; addr < phys_ram_size; addr += TARGET_PAGE_SIZE) {
++#ifdef USE_KVM
++        if (kvm_allowed && (addr>=0xa0000) && (addr<0xc0000)) /* do not access video-addresses */
++            continue;
++#endif
+         sum = calc_page_checksum(addr);
+         raddr = qemu_get_be32(f);
+         rsum  = qemu_get_be32(f);
+--- qemu-0.9.0/sdl.c.kvm	2007-01-24 22:40:21.000000000 +0100
++++ qemu-0.9.0/sdl.c	2007-03-14 13:22:34.000000000 +0100
+@@ -214,6 +214,11 @@ static void sdl_update_caption(void)
+ {
+     char buf[1024];
+     strcpy(buf, "QEMU");
++#if USE_KVM
++    if (kvm_allowed) {
++        strcat(buf, "/KVM");
++    }
++#endif
+     if (!vm_running) {
+         strcat(buf, " [Stopped]");
+     }
+--- qemu-0.9.0/vl.c.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/vl.c	2007-03-14 13:25:30.000000000 +0100
+@@ -88,6 +88,10 @@
+ 
+ #include "exec-all.h"
+ 
++#if USE_KVM
++#include "qemu-kvm.h"
++#endif
++
+ #define DEFAULT_NETWORK_SCRIPT "/etc/qemu-ifup"
+ #ifdef __sun__
+ #define SMBD_COMMAND "/usr/sfw/sbin/smbd"
+@@ -148,6 +152,9 @@ int graphic_height = 600;
+ int graphic_depth = 15;
+ int full_screen = 0;
+ int no_quit = 0;
++#ifdef USE_KVM
++CharDriverState *vmchannel_hds[MAX_VMCHANNEL_DEVICES];
++#endif
+ CharDriverState *serial_hds[MAX_SERIAL_PORTS];
+ CharDriverState *parallel_hds[MAX_PARALLEL_PORTS];
+ #ifdef TARGET_I386
+@@ -5409,6 +5416,15 @@ int cpu_load(QEMUFile *f, void *opaque, 
+     /* XXX: compute hflags from scratch, except for CPL and IIF */
+     env->hflags = hflags;
+     tlb_flush(env, 1);
++#ifdef USE_KVM
++    if (kvm_allowed) {
++        for (i = 0; i < NR_IRQ_WORDS ; i++) {
++            qemu_get_betls(f, &env->kvm_interrupt_bitmap[i]);
++        }
++        qemu_get_be64s(f, &env->tsc);
++        kvm_load_registers(env);
++    }
++#endif
+     return 0;
+ }
+ 
+@@ -5557,6 +5573,10 @@ static int ram_load_v1(QEMUFile *f, void
+     if (qemu_get_be32(f) != phys_ram_size)
+         return -EINVAL;
+     for(i = 0; i < phys_ram_size; i+= TARGET_PAGE_SIZE) {
++#ifdef USE_KVM
++        if (kvm_allowed && (i>=0xa0000) && (i<0xc0000)) /* do not access video-addresses */
++            continue;
++#endif
+         ret = ram_get_page(f, phys_ram_base + i, TARGET_PAGE_SIZE);
+         if (ret)
+             return ret;
+@@ -5691,6 +5711,10 @@ static void ram_save_live(QEMUFile *f, v
+     target_ulong addr;
+ 
+     for (addr = 0; addr < phys_ram_size; addr += TARGET_PAGE_SIZE) {
++#ifdef USE_KVM
++        if (kvm_allowed && (addr>=0xa0000) && (addr<0xc0000)) /* do not access video-addresses */
++            continue;
++#endif
+ 	if (cpu_physical_memory_get_dirty(addr, MIGRATION_DIRTY_FLAG)) {
+ 	    qemu_put_be32(f, addr);
+ 	    qemu_put_buffer(f, phys_ram_base + addr, TARGET_PAGE_SIZE);
+@@ -6239,6 +6263,10 @@ int main_loop(void)
+             if (reset_requested) {
+                 reset_requested = 0;
+                 qemu_system_reset();
++#ifdef USE_KVM
++		if (kvm_allowed)
++			kvm_load_registers(env);
++#endif
+                 ret = EXCP_INTERRUPT;
+             }
+             if (powerdown_requested) {
+@@ -6356,6 +6384,9 @@ void help(void)
+            "\n"
+            "Debug/Expert options:\n"
+            "-monitor dev    redirect the monitor to char device 'dev'\n"
++#ifdef USE_KVM
++           "-vmchannel di:DI,dev  redirect the hypercall device with device id DI, to char device 'dev'\n"
++#endif
+            "-serial dev     redirect the serial port to char device 'dev'\n"
+            "-parallel dev   redirect the parallel port to char device 'dev'\n"
+            "-pidfile file   Write PID to 'file'\n"
+@@ -6370,6 +6401,9 @@ void help(void)
+            "-kernel-kqemu   enable KQEMU full virtualization (default is user mode only)\n"
+            "-no-kqemu       disable KQEMU kernel module usage\n"
+ #endif
++#ifdef USE_KVM
++	   "-no-kvm         disable KVM hardware virtualization\n"
++#endif
+ #ifdef USE_CODE_COPY
+            "-no-code-copy   disable code copy acceleration\n"
+ #endif
+@@ -6450,6 +6484,9 @@ enum {
+     QEMU_OPTION_g,
+     QEMU_OPTION_std_vga,
+     QEMU_OPTION_monitor,
++#ifdef USE_KVM
++    QEMU_OPTION_vmchannel,
++#endif
+     QEMU_OPTION_serial,
+     QEMU_OPTION_parallel,
+     QEMU_OPTION_loadvm,
+@@ -6464,6 +6501,7 @@ enum {
+     QEMU_OPTION_smp,
+     QEMU_OPTION_vnc,
+     QEMU_OPTION_no_acpi,
++    QEMU_OPTION_no_kvm,
+     QEMU_OPTION_no_reboot,
+     QEMU_OPTION_daemonize,
+     QEMU_OPTION_option_rom,
+@@ -6526,12 +6564,18 @@ const QEMUOption qemu_options[] = {
+     { "no-kqemu", 0, QEMU_OPTION_no_kqemu },
+     { "kernel-kqemu", 0, QEMU_OPTION_kernel_kqemu },
+ #endif
++#ifdef USE_KVM
++    { "no-kvm", 0, QEMU_OPTION_no_kvm },
++#endif
+ #if defined(TARGET_PPC) || defined(TARGET_SPARC)
+     { "g", 1, QEMU_OPTION_g },
+ #endif
+     { "localtime", 0, QEMU_OPTION_localtime },
+     { "std-vga", 0, QEMU_OPTION_std_vga },
+     { "monitor", 1, QEMU_OPTION_monitor },
++#ifdef USE_KVM
++    { "vmchannel", 1, QEMU_OPTION_vmchannel },
++#endif
+     { "serial", 1, QEMU_OPTION_serial },
+     { "parallel", 1, QEMU_OPTION_parallel },
+     { "loadvm", HAS_ARG, QEMU_OPTION_loadvm },
+@@ -6789,6 +6833,10 @@ int main(int argc, char **argv)
+     const char *r, *optarg;
+     CharDriverState *monitor_hd;
+     char monitor_device[128];
++#ifdef USE_KVM
++    char vmchannel_devices[MAX_VMCHANNEL_DEVICES][128];
++    int vmchannel_device_index;
++#endif
+     char serial_devices[MAX_SERIAL_PORTS][128];
+     int serial_device_index;
+     char parallel_devices[MAX_PARALLEL_PORTS][128];
+@@ -6859,6 +6907,12 @@ int main(int argc, char **argv)
+     translation = BIOS_ATA_TRANSLATION_AUTO;
+     pstrcpy(monitor_device, sizeof(monitor_device), "vc");
+ 
++#ifdef USE_KVM
++    for(i = 0; i < MAX_VMCHANNEL_DEVICES; i++)
++        vmchannel_devices[i][0] = '\0';
++    vmchannel_device_index = 0;
++#endif
++
+     pstrcpy(serial_devices[0], sizeof(serial_devices[0]), "vc");
+     for(i = 1; i < MAX_SERIAL_PORTS; i++)
+         serial_devices[i][0] = '\0';
+@@ -7146,6 +7200,17 @@ int main(int argc, char **argv)
+             case QEMU_OPTION_monitor:
+                 pstrcpy(monitor_device, sizeof(monitor_device), optarg);
+                 break;
++#ifdef USE_KVM
++            case QEMU_OPTION_vmchannel:
++                if (vmchannel_device_index >= MAX_VMCHANNEL_DEVICES) {
++                    fprintf(stderr, "qemu: too many vmchannel devices\n");
++                    exit(1);
++                }
++                pstrcpy(vmchannel_devices[vmchannel_device_index], 
++                        sizeof(vmchannel_devices[0]), optarg);
++                vmchannel_device_index++;
++                break;
++#endif
+             case QEMU_OPTION_serial:
+                 if (serial_device_index >= MAX_SERIAL_PORTS) {
+                     fprintf(stderr, "qemu: too many serial ports\n");
+@@ -7194,6 +7259,11 @@ int main(int argc, char **argv)
+                 kqemu_allowed = 2;
+                 break;
+ #endif
++#ifdef USE_KVM
++	    case QEMU_OPTION_no_kvm:
++		kvm_allowed = 0;
++		break;
++#endif
+             case QEMU_OPTION_usb:
+                 usb_enabled = 1;
+                 break;
+@@ -7284,6 +7354,15 @@ int main(int argc, char **argv)
+     }
+ #endif
+ 
++#if USE_KVM
++    if (kvm_allowed) {
++	if (kvm_qemu_init() < 0) {
++	    fprintf(stderr, "Could not initialize KVM, will disable KVM support\n");
++	    kvm_allowed = 0;
++	}
++    }
++#endif
++
+ #ifdef USE_KQEMU
+     if (smp_cpus > 1)
+         kqemu_allowed = 0;
+@@ -7354,11 +7433,28 @@ int main(int argc, char **argv)
+     /* init the memory */
+     phys_ram_size = ram_size + vga_ram_size + MAX_BIOS_SIZE;
+ 
++#if USE_KVM
++    /* Initialize kvm */
++    if (kvm_allowed) {
++	    phys_ram_size += KVM_EXTRA_PAGES * 4096;
++	    if (kvm_qemu_create_context() < 0) {
++		    fprintf(stderr, "Could not create KVM context\n");
++		    exit(1);
++	    }
++    } else {
++	    phys_ram_base = qemu_vmalloc(phys_ram_size);
++	    if (!phys_ram_base) {
++		    fprintf(stderr, "Could not allocate physical memory\n");
++		    exit(1);
++	    }
++    }
++#else
+     phys_ram_base = qemu_vmalloc(phys_ram_size);
+     if (!phys_ram_base) {
+         fprintf(stderr, "Could not allocate physical memory\n");
+         exit(1);
+     }
++#endif
+ 
+     /* we always create the cdrom drive, even if no disk is there */
+     bdrv_init();
+@@ -7437,6 +7533,33 @@ int main(int argc, char **argv)
+     }
+     monitor_init(monitor_hd, !nographic);
+ 
++#ifdef USE_KVM
++    for(i = 0; i < MAX_VMCHANNEL_DEVICES; i++) {
++        const char *devname = vmchannel_devices[i];
++        if (devname[0] != '\0' && strcmp(devname, "none")) {
++            int devid;
++            char *termn;
++
++            if (strstart(devname, "di:", &devname)) {
++                devid = strtol(devname, &termn, 16);
++                devname = termn + 1;
++            }
++            else {
++                fprintf(stderr, "qemu: could not find vmchannel device id '%s'\n", 
++                        devname);
++                exit(1);
++            }
++            vmchannel_hds[i] = qemu_chr_open(devname);
++            if (!vmchannel_hds[i]) {
++                fprintf(stderr, "qemu: could not open vmchannel device '%s'\n", 
++                        devname);
++                exit(1);
++            }
++            vmchannel_init(vmchannel_hds[i], devid, i);
++        }
++    }
++#endif
++
+     for(i = 0; i < MAX_SERIAL_PORTS; i++) {
+         const char *devname = serial_devices[i];
+         if (devname[0] != '\0' && strcmp(devname, "none")) {
+--- qemu-0.9.0/vl.h.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/vl.h	2007-03-14 13:22:34.000000000 +0100
+@@ -157,6 +157,7 @@ extern int graphic_height;
+ extern int graphic_depth;
+ extern const char *keyboard_layout;
+ extern int kqemu_allowed;
++extern int kvm_allowed;
+ extern int win2k_install_hack;
+ extern int usb_enabled;
+ extern int smp_cpus;
+@@ -176,6 +177,10 @@ extern int nb_option_roms;
+ #define BIOS_SIZE (4 * 1024 * 1024)
+ #endif
+ 
++#if USE_KVM
++#define KVM_EXTRA_PAGES 3
++#endif
++
+ /* keyboard/mouse support */
+ 
+ #define MOUSE_EVENT_LBUTTON 0x01
+@@ -341,6 +346,10 @@ int is_graphic_console(void);
+ CharDriverState *text_console_init(DisplayState *ds);
+ void console_select(unsigned int index);
+ 
++/* vmchannel devices */
++
++#define MAX_VMCHANNEL_DEVICES 4
++
+ /* serial ports */
+ 
+ #define MAX_SERIAL_PORTS 4
+@@ -1219,6 +1228,11 @@ int PPC_NVRAM_set_params (m48t59_t *nvra
+ 
+ typedef struct ADBDevice ADBDevice;
+ 
++/* hypercall.c */
++
++void pci_hypercall_init(PCIBus *bus);
++void vmchannel_init(CharDriverState *hd, uint32_t deviceid, uint32_t index);
++
+ /* buf = NULL means polling */
+ typedef int ADBDeviceRequest(ADBDevice *d, uint8_t *buf_out,
+                               const uint8_t *buf, int len);
+--- qemu-0.9.0/qemu-kvm.c.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/qemu-kvm.c	2007-03-14 13:22:34.000000000 +0100
+@@ -0,0 +1,793 @@
++
++#include "config.h"
++#include "config-host.h"
++
++#ifdef USE_KVM
++
++#include "exec.h"
++
++#include "qemu-kvm.h"
++#include <kvmctl.h>
++#include <string.h>
++
++#define MSR_IA32_TSC		0x10
++
++extern void perror(const char *s);
++
++int kvm_allowed = 1;
++kvm_context_t kvm_context;
++static struct kvm_msr_list *kvm_msr_list;
++static int kvm_has_msr_star;
++
++#define NR_CPU 16
++static CPUState *saved_env[NR_CPU];
++
++static void set_msr_entry(struct kvm_msr_entry *entry, uint32_t index, 
++                          uint64_t data)
++{
++    entry->index = index;
++    entry->data  = data;
++}
++
++/* returns 0 on success, non-0 on failure */
++static int get_msr_entry(struct kvm_msr_entry *entry, CPUState *env)
++{
++        switch (entry->index) {
++        case MSR_IA32_SYSENTER_CS:  
++            env->sysenter_cs  = entry->data;
++            break;
++        case MSR_IA32_SYSENTER_ESP:
++            env->sysenter_esp = entry->data;
++            break;
++        case MSR_IA32_SYSENTER_EIP:
++            env->sysenter_eip = entry->data;
++            break;
++        case MSR_STAR:
++            env->star         = entry->data;
++            break;
++#ifdef TARGET_X86_64
++        case MSR_CSTAR:
++            env->cstar        = entry->data;
++            break;
++        case MSR_KERNELGSBASE:
++            env->kernelgsbase = entry->data;
++            break;
++        case MSR_FMASK:
++            env->fmask        = entry->data;
++            break;
++        case MSR_LSTAR:
++            env->lstar        = entry->data;
++            break;
++#endif
++        case MSR_IA32_TSC:
++            env->tsc          = entry->data;
++            break;
++        default:
++            printf("Warning unknown msr index 0x%x\n", entry->index);
++            return 1;
++        }
++        return 0;
++}
++
++#ifdef TARGET_X86_64
++#define MSR_COUNT 9
++#else
++#define MSR_COUNT 5
++#endif
++
++static void set_v8086_seg(struct kvm_segment *lhs, const SegmentCache *rhs)
++{
++    lhs->selector = rhs->selector;
++    lhs->base = rhs->base;
++    lhs->limit = rhs->limit;
++    lhs->type = 3;
++    lhs->present = 1;
++    lhs->dpl = 3;
++    lhs->db = 0;
++    lhs->s = 1;
++    lhs->l = 0;
++    lhs->g = 0;
++    lhs->avl = 0;
++    lhs->unusable = 0;
++}
++
++static void set_seg(struct kvm_segment *lhs, const SegmentCache *rhs)
++{
++    unsigned flags = rhs->flags;
++    lhs->selector = rhs->selector;
++    lhs->base = rhs->base;
++    lhs->limit = rhs->limit;
++    lhs->type = (flags >> DESC_TYPE_SHIFT) & 15;
++    lhs->present = (flags & DESC_P_MASK) != 0;
++    lhs->dpl = rhs->selector & 3;
++    lhs->db = (flags >> DESC_B_SHIFT) & 1;
++    lhs->s = (flags & DESC_S_MASK) != 0;
++    lhs->l = (flags >> DESC_L_SHIFT) & 1;
++    lhs->g = (flags & DESC_G_MASK) != 0;
++    lhs->avl = (flags & DESC_AVL_MASK) != 0;
++    lhs->unusable = 0;
++}
++
++static void get_seg(SegmentCache *lhs, const struct kvm_segment *rhs)
++{
++    lhs->selector = rhs->selector;
++    lhs->base = rhs->base;
++    lhs->limit = rhs->limit;
++    lhs->flags =
++	(rhs->type << DESC_TYPE_SHIFT)
++	| (rhs->present * DESC_P_MASK)
++	| (rhs->dpl << DESC_DPL_SHIFT)
++	| (rhs->db << DESC_B_SHIFT)
++	| (rhs->s * DESC_S_MASK)
++	| (rhs->l << DESC_L_SHIFT)
++	| (rhs->g * DESC_G_MASK)
++	| (rhs->avl * DESC_AVL_MASK);
++}
++
++/* the reset values of qemu are not compatible to SVM
++ * this function is used to fix the segment descriptor values */
++static void fix_realmode_dataseg(struct kvm_segment *seg)
++{
++	seg->type = 0x02;
++	seg->present = 1;
++	seg->s = 1;
++}
++
++static void load_regs(CPUState *env)
++{
++    struct kvm_regs regs;
++    struct kvm_sregs sregs;
++    struct kvm_msr_entry msrs[MSR_COUNT];
++    int rc, n;
++
++    /* hack: save env */
++    if (!saved_env[0])
++	saved_env[0] = env;
++
++    regs.rax = env->regs[R_EAX];
++    regs.rbx = env->regs[R_EBX];
++    regs.rcx = env->regs[R_ECX];
++    regs.rdx = env->regs[R_EDX];
++    regs.rsi = env->regs[R_ESI];
++    regs.rdi = env->regs[R_EDI];
++    regs.rsp = env->regs[R_ESP];
++    regs.rbp = env->regs[R_EBP];
++#ifdef TARGET_X86_64
++    regs.r8 = env->regs[8];
++    regs.r9 = env->regs[9];
++    regs.r10 = env->regs[10];
++    regs.r11 = env->regs[11];
++    regs.r12 = env->regs[12];
++    regs.r13 = env->regs[13];
++    regs.r14 = env->regs[14];
++    regs.r15 = env->regs[15];
++#endif
++    
++    regs.rflags = env->eflags;
++    regs.rip = env->eip;
++
++    kvm_set_regs(kvm_context, 0, &regs);
++
++    memcpy(sregs.interrupt_bitmap, env->kvm_interrupt_bitmap, sizeof(sregs.interrupt_bitmap));
++
++    if ((env->eflags & VM_MASK)) {
++	    set_v8086_seg(&sregs.cs, &env->segs[R_CS]);
++	    set_v8086_seg(&sregs.ds, &env->segs[R_DS]);
++	    set_v8086_seg(&sregs.es, &env->segs[R_ES]);
++	    set_v8086_seg(&sregs.fs, &env->segs[R_FS]);
++	    set_v8086_seg(&sregs.gs, &env->segs[R_GS]);
++	    set_v8086_seg(&sregs.ss, &env->segs[R_SS]);
++    } else {
++	    set_seg(&sregs.cs, &env->segs[R_CS]);
++	    set_seg(&sregs.ds, &env->segs[R_DS]);
++	    set_seg(&sregs.es, &env->segs[R_ES]);
++	    set_seg(&sregs.fs, &env->segs[R_FS]);
++	    set_seg(&sregs.gs, &env->segs[R_GS]);
++	    set_seg(&sregs.ss, &env->segs[R_SS]);
++
++	    if (env->cr[0] & CR0_PE_MASK) {
++		/* force ss cpl to cs cpl */
++		sregs.ss.selector = (sregs.ss.selector & ~3) | 
++			(sregs.cs.selector & 3);
++		sregs.ss.dpl = sregs.ss.selector & 3;
++	    }
++
++	    if (!(env->cr[0] & CR0_PG_MASK)) {
++		    fix_realmode_dataseg(&sregs.ds);
++		    fix_realmode_dataseg(&sregs.es);
++		    fix_realmode_dataseg(&sregs.fs);
++		    fix_realmode_dataseg(&sregs.gs);
++		    fix_realmode_dataseg(&sregs.ss);
++	    }
++    }
++
++    set_seg(&sregs.tr, &env->tr);
++    set_seg(&sregs.ldt, &env->ldt);
++
++    sregs.idt.limit = env->idt.limit;
++    sregs.idt.base = env->idt.base;
++    sregs.gdt.limit = env->gdt.limit;
++    sregs.gdt.base = env->gdt.base;
++
++    sregs.cr0 = env->cr[0];
++    sregs.cr2 = env->cr[2];
++    sregs.cr3 = env->cr[3];
++    sregs.cr4 = env->cr[4];
++
++    sregs.apic_base = cpu_get_apic_base(env);
++    sregs.efer = env->efer;
++    sregs.cr8 = cpu_get_apic_tpr(env);
++
++    kvm_set_sregs(kvm_context, 0, &sregs);
++
++    /* msrs */
++    n = 0;
++    set_msr_entry(&msrs[n++], MSR_IA32_SYSENTER_CS,  env->sysenter_cs);
++    set_msr_entry(&msrs[n++], MSR_IA32_SYSENTER_ESP, env->sysenter_esp);
++    set_msr_entry(&msrs[n++], MSR_IA32_SYSENTER_EIP, env->sysenter_eip);
++    if (kvm_has_msr_star)
++	set_msr_entry(&msrs[n++], MSR_STAR,              env->star);
++    set_msr_entry(&msrs[n++], MSR_IA32_TSC, env->tsc);
++#ifdef TARGET_X86_64
++    set_msr_entry(&msrs[n++], MSR_CSTAR,             env->cstar);
++    set_msr_entry(&msrs[n++], MSR_KERNELGSBASE,      env->kernelgsbase);
++    set_msr_entry(&msrs[n++], MSR_FMASK,             env->fmask);
++    set_msr_entry(&msrs[n++], MSR_LSTAR  ,           env->lstar);
++#endif
++
++    rc = kvm_set_msrs(kvm_context, 0, msrs, n);
++    if (rc == -1)
++        perror("kvm_set_msrs FAILED");
++}
++
++
++static void save_regs(CPUState *env)
++{
++    struct kvm_regs regs;
++    struct kvm_sregs sregs;
++    struct kvm_msr_entry msrs[MSR_COUNT];
++    uint32_t hflags;
++    uint32_t i, n, rc;
++
++    kvm_get_regs(kvm_context, 0, &regs);
++
++    env->regs[R_EAX] = regs.rax;
++    env->regs[R_EBX] = regs.rbx;
++    env->regs[R_ECX] = regs.rcx;
++    env->regs[R_EDX] = regs.rdx;
++    env->regs[R_ESI] = regs.rsi;
++    env->regs[R_EDI] = regs.rdi;
++    env->regs[R_ESP] = regs.rsp;
++    env->regs[R_EBP] = regs.rbp;
++#ifdef TARGET_X86_64
++    env->regs[8] = regs.r8;
++    env->regs[9] = regs.r9;
++    env->regs[10] = regs.r10;
++    env->regs[11] = regs.r11;
++    env->regs[12] = regs.r12;
++    env->regs[13] = regs.r13;
++    env->regs[14] = regs.r14;
++    env->regs[15] = regs.r15;
++#endif
++
++    env->eflags = regs.rflags;
++    env->eip = regs.rip;
++
++    kvm_get_sregs(kvm_context, 0, &sregs);
++
++    memcpy(env->kvm_interrupt_bitmap, sregs.interrupt_bitmap, sizeof(env->kvm_interrupt_bitmap));
++
++    get_seg(&env->segs[R_CS], &sregs.cs);
++    get_seg(&env->segs[R_DS], &sregs.ds);
++    get_seg(&env->segs[R_ES], &sregs.es);
++    get_seg(&env->segs[R_FS], &sregs.fs);
++    get_seg(&env->segs[R_GS], &sregs.gs);
++    get_seg(&env->segs[R_SS], &sregs.ss);
++
++    get_seg(&env->tr, &sregs.tr);
++    get_seg(&env->ldt, &sregs.ldt);
++    
++    env->idt.limit = sregs.idt.limit;
++    env->idt.base = sregs.idt.base;
++    env->gdt.limit = sregs.gdt.limit;
++    env->gdt.base = sregs.gdt.base;
++
++    env->cr[0] = sregs.cr0;
++    env->cr[2] = sregs.cr2;
++    env->cr[3] = sregs.cr3;
++    env->cr[4] = sregs.cr4;
++
++    cpu_set_apic_base(env, sregs.apic_base);
++
++    env->efer = sregs.efer;
++    cpu_set_apic_tpr(env, sregs.cr8);
++
++#define HFLAG_COPY_MASK ~( \
++			HF_CPL_MASK | HF_PE_MASK | HF_MP_MASK | HF_EM_MASK | \
++			HF_TS_MASK | HF_TF_MASK | HF_VM_MASK | HF_IOPL_MASK | \
++			HF_OSFXSR_MASK | HF_LMA_MASK | HF_CS32_MASK | \
++			HF_SS32_MASK | HF_CS64_MASK | HF_ADDSEG_MASK)
++
++
++
++    hflags = (env->segs[R_CS].flags >> DESC_DPL_SHIFT) & HF_CPL_MASK;
++    hflags |= (env->cr[0] & CR0_PE_MASK) << (HF_PE_SHIFT - CR0_PE_SHIFT);
++    hflags |= (env->cr[0] << (HF_MP_SHIFT - CR0_MP_SHIFT)) & 
++	    (HF_MP_MASK | HF_EM_MASK | HF_TS_MASK);
++    hflags |= (env->eflags & (HF_TF_MASK | HF_VM_MASK | HF_IOPL_MASK)); 
++    hflags |= (env->cr[4] & CR4_OSFXSR_MASK) << 
++	    (HF_OSFXSR_SHIFT - CR4_OSFXSR_SHIFT);
++
++    if (env->efer & MSR_EFER_LMA) {
++        hflags |= HF_LMA_MASK;
++    }
++
++    if ((hflags & HF_LMA_MASK) && (env->segs[R_CS].flags & DESC_L_MASK)) {
++        hflags |= HF_CS32_MASK | HF_SS32_MASK | HF_CS64_MASK;
++    } else {
++        hflags |= (env->segs[R_CS].flags & DESC_B_MASK) >> 
++		(DESC_B_SHIFT - HF_CS32_SHIFT);
++        hflags |= (env->segs[R_SS].flags & DESC_B_MASK) >> 
++		(DESC_B_SHIFT - HF_SS32_SHIFT);
++        if (!(env->cr[0] & CR0_PE_MASK) || 
++                   (env->eflags & VM_MASK) ||
++                   !(hflags & HF_CS32_MASK)) {
++                hflags |= HF_ADDSEG_MASK;
++            } else {
++                hflags |= ((env->segs[R_DS].base | 
++                                env->segs[R_ES].base |
++                                env->segs[R_SS].base) != 0) << 
++                    HF_ADDSEG_SHIFT;
++            }
++    }
++    env->hflags = (env->hflags & HFLAG_COPY_MASK) | hflags;
++    CC_SRC = env->eflags & (CC_O | CC_S | CC_Z | CC_A | CC_P | CC_C);
++    DF = 1 - (2 * ((env->eflags >> 10) & 1));
++    CC_OP = CC_OP_EFLAGS;
++    env->eflags &= ~(DF_MASK | CC_O | CC_S | CC_Z | CC_A | CC_P | CC_C);
++
++    tlb_flush(env, 1);
++
++    /* msrs */    
++    n = 0;
++    msrs[n++].index = MSR_IA32_SYSENTER_CS;
++    msrs[n++].index = MSR_IA32_SYSENTER_ESP;
++    msrs[n++].index = MSR_IA32_SYSENTER_EIP;
++    if (kvm_has_msr_star)
++	msrs[n++].index = MSR_STAR;
++    msrs[n++].index = MSR_IA32_TSC;
++#ifdef TARGET_X86_64
++    msrs[n++].index = MSR_CSTAR;
++    msrs[n++].index = MSR_KERNELGSBASE;
++    msrs[n++].index = MSR_FMASK;
++    msrs[n++].index = MSR_LSTAR;
++#endif
++    rc = kvm_get_msrs(kvm_context, 0, msrs, n);
++    if (rc == -1) {
++        perror("kvm_get_msrs FAILED");
++    }
++    else {
++        n = rc; /* actual number of MSRs */
++        for (i=0 ; i<n; i++) {
++            if (get_msr_entry(&msrs[i], env))
++                return;
++        }
++    }
++}
++
++#include <signal.h>
++
++
++static int try_push_interrupts(void *opaque)
++{
++    CPUState **envs = opaque, *env;
++    env = envs[0];
++
++    if (env->ready_for_interrupt_injection &&
++        (env->interrupt_request & CPU_INTERRUPT_HARD) &&
++        (env->eflags & IF_MASK)) {
++            env->interrupt_request &= ~CPU_INTERRUPT_HARD;
++            // for now using cpu 0
++            kvm_inject_irq(kvm_context, 0, cpu_get_pic_interrupt(env));
++    }
++
++    return (env->interrupt_request & CPU_INTERRUPT_HARD) != 0;
++}
++
++static void post_kvm_run(void *opaque, struct kvm_run *kvm_run)
++{
++    CPUState **envs = opaque, *env;
++    env = envs[0];
++
++    env->eflags = (kvm_run->if_flag) ? env->eflags | IF_MASK:env->eflags & ~IF_MASK;
++    env->ready_for_interrupt_injection = kvm_run->ready_for_interrupt_injection;
++    cpu_set_apic_tpr(env, kvm_run->cr8);
++    cpu_set_apic_base(env, kvm_run->apic_base);
++}
++
++static void pre_kvm_run(void *opaque, struct kvm_run *kvm_run)
++{
++    CPUState **envs = opaque, *env;
++    env = envs[0];
++
++    kvm_run->cr8 = cpu_get_apic_tpr(env);
++}
++
++void kvm_load_registers(CPUState *env)
++{
++    load_regs(env);
++}
++
++void kvm_save_registers(CPUState *env)
++{
++    save_regs(env);
++}
++
++int kvm_cpu_exec(CPUState *env)
++{
++    int r;
++    int pending = (!env->ready_for_interrupt_injection ||
++                   ((env->interrupt_request & CPU_INTERRUPT_HARD) &&
++		   (env->eflags & IF_MASK)));
++
++    if (!pending && (env->interrupt_request & CPU_INTERRUPT_EXIT)) {
++        env->interrupt_request &= ~CPU_INTERRUPT_EXIT;
++        env->exception_index = EXCP_INTERRUPT;
++        cpu_loop_exit();
++    }
++
++    
++    if (!saved_env[0])
++	saved_env[0] = env;
++
++    r = kvm_run(kvm_context, 0);
++    if (r < 0) {
++        printf("kvm_run returned %d\n", r);
++        exit(1);
++    }
++
++    return 0;
++}
++
++
++static int kvm_cpuid(void *opaque, uint64_t *rax, uint64_t *rbx, 
++		      uint64_t *rcx, uint64_t *rdx)
++{
++    CPUState **envs = opaque;
++    CPUState *saved_env;
++    uint32_t eax = *rax;
++
++    saved_env = env;
++    env = envs[0];
++
++    env->regs[R_EAX] = *rax;
++    env->regs[R_EBX] = *rbx;
++    env->regs[R_ECX] = *rcx;
++    env->regs[R_EDX] = *rdx;
++    helper_cpuid();
++    *rdx = env->regs[R_EDX];
++    *rcx = env->regs[R_ECX];
++    *rbx = env->regs[R_EBX];
++    *rax = env->regs[R_EAX];
++    // don't report long mode/syscall/nx if no native support
++    if (eax == 0x80000001) {
++	unsigned long h_eax = eax, h_edx;
++
++
++	// push/pop hack to workaround gcc 3 register pressure trouble
++	asm (
++#ifdef __x86_64__
++	     "push %%rbx; push %%rcx; cpuid; pop %%rcx; pop %%rbx"
++#else
++	     "push %%ebx; push %%ecx; cpuid; pop %%ecx; pop %%ebx"
++#endif
++	     : "+a"(h_eax), "=d"(h_edx));
++
++	// long mode
++	if ((h_edx & 0x20000000) == 0)
++	    *rdx &= ~0x20000000ull;
++	// syscall
++	if ((h_edx & 0x00000800) == 0)
++	    *rdx &= ~0x00000800ull;
++	// nx
++	if ((h_edx & 0x00100000) == 0)
++	    *rdx &= ~0x00100000ull;
++    }
++    env = saved_env;
++    return 0;
++}
++
++static int kvm_debug(void *opaque, int vcpu)
++{
++    CPUState **envs = opaque;
++
++    env = envs[0];
++    env->exception_index = EXCP_DEBUG;
++    return 1;
++}
++
++static int kvm_inb(void *opaque, uint16_t addr, uint8_t *data)
++{
++    *data = cpu_inb(0, addr);
++    return 0;
++}
++
++static int kvm_inw(void *opaque, uint16_t addr, uint16_t *data)
++{
++    *data = cpu_inw(0, addr);
++    return 0;
++}
++
++static int kvm_inl(void *opaque, uint16_t addr, uint32_t *data)
++{
++    *data = cpu_inl(0, addr);
++    return 0;
++}
++
++static int kvm_outb(void *opaque, uint16_t addr, uint8_t data)
++{
++    if (addr == 0xb2 && data == 0) {
++	struct kvm_regs regs;
++
++	kvm_get_regs(kvm_context, 0, &regs);
++
++	/* hack around smm entry: kvm doesn't emulate smm at this time */
++	if (regs.rip == 0x409f4)
++	    regs.rip += 0x4b;
++	kvm_set_regs(kvm_context, 0, &regs);
++	
++	return 0;
++    }
++    cpu_outb(0, addr, data);
++    return 0;
++}
++
++static int kvm_outw(void *opaque, uint16_t addr, uint16_t data)
++{
++    cpu_outw(0, addr, data);
++    return 0;
++}
++
++static int kvm_outl(void *opaque, uint16_t addr, uint32_t data)
++{
++    cpu_outl(0, addr, data);
++    return 0;
++}
++
++static int kvm_readb(void *opaque, uint64_t addr, uint8_t *data)
++{
++    *data = ldub_phys(addr);
++    return 0;
++}
++ 
++static int kvm_readw(void *opaque, uint64_t addr, uint16_t *data)
++{
++    *data = lduw_phys(addr);
++    return 0;
++}
++
++static int kvm_readl(void *opaque, uint64_t addr, uint32_t *data)
++{
++    *data = ldl_phys(addr);
++    return 0;
++}
++
++static int kvm_readq(void *opaque, uint64_t addr, uint64_t *data)
++{
++    *data = ldq_phys(addr);
++    return 0;
++}
++
++static int kvm_writeb(void *opaque, uint64_t addr, uint8_t data)
++{
++    stb_phys(addr, data);
++    return 0;
++}
++
++static int kvm_writew(void *opaque, uint64_t addr, uint16_t data)
++{
++    stw_phys(addr, data);
++    return 0;
++}
++
++static int kvm_writel(void *opaque, uint64_t addr, uint32_t data)
++{
++    stl_phys(addr, data);
++    return 0;
++}
++
++static int kvm_writeq(void *opaque, uint64_t addr, uint64_t data)
++{
++    stq_phys(addr, data);
++    return 0;
++}
++
++static int kvm_io_window(void *opaque)
++{
++    return 1;
++}
++
++ 
++static int kvm_halt(void *opaque, int vcpu)
++{
++    CPUState **envs = opaque, *env;
++
++    env = envs[0];
++    if (!((env->interrupt_request & CPU_INTERRUPT_HARD) &&
++	  (env->eflags & IF_MASK))) {
++	    env->hflags |= HF_HALTED_MASK;
++	    env->exception_index = EXCP_HLT;
++    }
++
++    return 1;
++}
++
++static int kvm_shutdown(void *opaque, int vcpu)
++{
++    qemu_system_reset_request();
++    return 1;
++}
++ 
++static struct kvm_callbacks qemu_kvm_ops = {
++    .cpuid = kvm_cpuid,
++    .debug = kvm_debug,
++    .inb   = kvm_inb,
++    .inw   = kvm_inw,
++    .inl   = kvm_inl,
++    .outb  = kvm_outb,
++    .outw  = kvm_outw,
++    .outl  = kvm_outl,
++    .readb = kvm_readb,
++    .readw = kvm_readw,
++    .readl = kvm_readl,
++    .readq = kvm_readq,
++    .writeb = kvm_writeb,
++    .writew = kvm_writew,
++    .writel = kvm_writel,
++    .writeq = kvm_writeq,
++    .halt  = kvm_halt,
++    .shutdown = kvm_shutdown,
++    .io_window = kvm_io_window,
++    .try_push_interrupts = try_push_interrupts,
++    .post_kvm_run = post_kvm_run,
++    .pre_kvm_run = pre_kvm_run,
++};
++
++int kvm_qemu_init()
++{
++    /* Try to initialize kvm */
++    kvm_context = kvm_init(&qemu_kvm_ops, saved_env);
++    if (!kvm_context) {
++      	return -1;
++    }
++
++    return 0;
++}
++
++int kvm_qemu_create_context(void)
++{
++    int i;
++
++    if (kvm_create(kvm_context, phys_ram_size, (void**)&phys_ram_base) < 0) {
++	kvm_qemu_destroy();
++	return -1;
++    }
++    kvm_msr_list = kvm_get_msr_list(kvm_context);
++    if (!kvm_msr_list) {
++	kvm_qemu_destroy();
++	return -1;
++    }
++    for (i = 0; i < kvm_msr_list->nmsrs; ++i)
++	if (kvm_msr_list->indices[i] == MSR_STAR)
++	    kvm_has_msr_star = 1;
++    return 0;
++}
++
++void kvm_qemu_destroy(void)
++{
++    kvm_finalize(kvm_context);
++}
++
++int kvm_update_debugger(CPUState *env)
++{
++    struct kvm_debug_guest dbg;
++    int i;
++
++    dbg.enabled = 0;
++    if (env->nb_breakpoints || env->singlestep_enabled) {
++	dbg.enabled = 1;
++	for (i = 0; i < 4 && i < env->nb_breakpoints; ++i) {
++	    dbg.breakpoints[i].enabled = 1;
++	    dbg.breakpoints[i].address = env->breakpoints[i];
++	}
++	dbg.singlestep = env->singlestep_enabled;
++    }
++    return kvm_guest_debug(kvm_context, 0, &dbg);
++}
++
++
++/*
++ * dirty pages logging
++ */
++/* FIXME: use unsigned long pointer instead of unsigned char */
++unsigned char *kvm_dirty_bitmap = NULL;
++int kvm_physical_memory_set_dirty_tracking(int enable)
++{
++    int r = 0;
++
++    if (!kvm_allowed)
++        return 0;
++
++    if (enable) {
++        if (!kvm_dirty_bitmap) {
++            unsigned bitmap_size = BITMAP_SIZE(phys_ram_size);
++            kvm_dirty_bitmap = qemu_malloc(bitmap_size);
++            if (kvm_dirty_bitmap == NULL) {
++                perror("Failed to allocate dirty pages bitmap");
++                r=-1;
++            }
++            else {
++                r = kvm_dirty_pages_log_enable_all(kvm_context);
++            }
++        }
++    }
++    else {
++        if (kvm_dirty_bitmap) {
++            r = kvm_dirty_pages_log_reset(kvm_context);
++            qemu_free(kvm_dirty_bitmap);
++            kvm_dirty_bitmap = NULL;
++        }
++    }
++    return r;
++}
++
++/* get kvm's dirty pages bitmap and update qemu's */
++int kvm_get_dirty_pages_log_slot(int slot, 
++                                 unsigned char *bitmap,
++                                 unsigned int offset,
++                                 unsigned int len)
++{
++    int r;
++    unsigned int i, j, n=0;
++    unsigned char c;
++    unsigned page_number, addr, addr1;
++
++    memset(bitmap, 0, len);
++    r = kvm_get_dirty_pages(kvm_context, slot, bitmap);
++    if (r)
++        return r;
++
++    /* 
++     * bitmap-traveling is faster than memory-traveling (for addr...) 
++     * especially when most of the memory is not dirty.
++     */
++    for (i=0; i<len; i++) {
++        c = bitmap[i];
++        while (c>0) {
++            j = ffsl(c) - 1;
++            c &= ~(1u<<j);
++            page_number = i * 8 + j;
++            addr1 = page_number * TARGET_PAGE_SIZE;
++            addr  = offset + addr1;
++            cpu_physical_memory_set_dirty(addr);
++            n++;
++        }
++    }
++    return 0;
++}
++
++/* 
++ * get kvm's dirty pages bitmap and update qemu's
++ * we only care about physical ram, which resides in slots 0 and 3
++ */
++int kvm_update_dirty_pages_log(void)
++{
++    int r = 0, len;
++
++    len = BITMAP_SIZE(0xa0000);
++    r =      kvm_get_dirty_pages_log_slot(3, kvm_dirty_bitmap, 0      , len);
++    len = BITMAP_SIZE(phys_ram_size - 0xc0000);
++    r = r || kvm_get_dirty_pages_log_slot(0, kvm_dirty_bitmap, 0xc0000, len);
++    return r;
++}
++#endif
+--- qemu-0.9.0/qemu-kvm.h.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/qemu-kvm.h	2007-03-14 13:22:34.000000000 +0100
+@@ -0,0 +1,19 @@
++#ifndef QEMU_KVM_H
++#define QEMU_KVM_H
++
++#include "kvmctl.h"
++
++int kvm_qemu_init(void);
++int kvm_qemu_create_context(void);
++void kvm_qemu_destroy(void);
++void kvm_load_registers(CPUState *env);
++void kvm_save_registers(CPUState *env);
++int kvm_cpu_exec(CPUState *env);
++int kvm_update_debugger(CPUState *env);
++
++int kvm_physical_memory_set_dirty_tracking(int enable);
++int kvm_update_dirty_pages_log(void);
++
++#define ALIGN(x, y)  (((x)+(y)-1) & ~((y)-1))
++#define BITMAP_SIZE(m) (ALIGN(((m)>>TARGET_PAGE_BITS), HOST_LONG_BITS) / 8)
++#endif
+--- qemu-0.9.0/kvm.h.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/kvm.h	2007-03-14 13:22:34.000000000 +0100
+@@ -0,0 +1,247 @@
++#ifndef __LINUX_KVM_H
++#define __LINUX_KVM_H
++
++/*
++ * Userspace interface for /dev/kvm - kernel based virtual machine
++ *
++ * Note: this interface is considered experimental and may change without
++ *       notice.
++ */
++
++#include <asm/types.h>
++#include <linux/ioctl.h>
++
++#define KVM_API_VERSION 4
++
++/*
++ * Architectural interrupt line count, and the size of the bitmap needed
++ * to hold them.
++ */
++#define KVM_NR_INTERRUPTS 256
++#define KVM_IRQ_BITMAP_SIZE_BYTES    ((KVM_NR_INTERRUPTS + 7) / 8)
++#define KVM_IRQ_BITMAP_SIZE(type)    (KVM_IRQ_BITMAP_SIZE_BYTES / sizeof(type))
++
++
++/* for KVM_CREATE_MEMORY_REGION */
++struct kvm_memory_region {
++	__u32 slot;
++	__u32 flags;
++	__u64 guest_phys_addr;
++	__u64 memory_size; /* bytes */
++};
++
++/* for kvm_memory_region::flags */
++#define KVM_MEM_LOG_DIRTY_PAGES  1UL
++
++
++#define KVM_EXIT_TYPE_FAIL_ENTRY 1
++#define KVM_EXIT_TYPE_VM_EXIT    2
++
++enum kvm_exit_reason {
++	KVM_EXIT_UNKNOWN          = 0,
++	KVM_EXIT_EXCEPTION        = 1,
++	KVM_EXIT_IO               = 2,
++	KVM_EXIT_CPUID            = 3,
++	KVM_EXIT_DEBUG            = 4,
++	KVM_EXIT_HLT              = 5,
++	KVM_EXIT_MMIO             = 6,
++	KVM_EXIT_IRQ_WINDOW_OPEN  = 7,
++	KVM_EXIT_SHUTDOWN         = 8,
++};
++
++/* for KVM_RUN */
++struct kvm_run {
++	/* in */
++	__u32 emulated;  /* skip current instruction */
++	__u32 mmio_completed; /* mmio request completed */
++	__u8 request_interrupt_window;
++	__u8 padding1[7];
++
++	/* out */
++	__u32 exit_type;
++	__u32 exit_reason;
++	__u32 instruction_length;
++	__u8 ready_for_interrupt_injection;
++	__u8 if_flag;
++	__u16 padding2;
++
++	/* in (pre_kvm_run), out (post_kvm_run) */
++	__u64 cr8;
++	__u64 apic_base;
++
++	union {
++		/* KVM_EXIT_UNKNOWN */
++		struct {
++			__u32 hardware_exit_reason;
++		} hw;
++		/* KVM_EXIT_EXCEPTION */
++		struct {
++			__u32 exception;
++			__u32 error_code;
++		} ex;
++		/* KVM_EXIT_IO */
++		struct {
++#define KVM_EXIT_IO_IN  0
++#define KVM_EXIT_IO_OUT 1
++			__u8 direction;
++			__u8 size; /* bytes */
++			__u8 string;
++			__u8 string_down;
++			__u8 rep;
++			__u8 pad;
++			__u16 port;
++			__u64 count;
++			union {
++				__u64 address;
++				__u32 value;
++			};
++		} io;
++		struct {
++		} debug;
++		/* KVM_EXIT_MMIO */
++		struct {
++			__u64 phys_addr;
++			__u8  data[8];
++			__u32 len;
++			__u8  is_write;
++		} mmio;
++	};
++};
++
++/* for KVM_GET_REGS and KVM_SET_REGS */
++struct kvm_regs {
++	/* out (KVM_GET_REGS) / in (KVM_SET_REGS) */
++	__u64 rax, rbx, rcx, rdx;
++	__u64 rsi, rdi, rsp, rbp;
++	__u64 r8,  r9,  r10, r11;
++	__u64 r12, r13, r14, r15;
++	__u64 rip, rflags;
++};
++
++struct kvm_segment {
++	__u64 base;
++	__u32 limit;
++	__u16 selector;
++	__u8  type;
++	__u8  present, dpl, db, s, l, g, avl;
++	__u8  unusable;
++	__u8  padding;
++};
++
++struct kvm_dtable {
++	__u64 base;
++	__u16 limit;
++	__u16 padding[3];
++};
++
++/* for KVM_GET_SREGS and KVM_SET_SREGS */
++struct kvm_sregs {
++	/* out (KVM_GET_SREGS) / in (KVM_SET_SREGS) */
++	struct kvm_segment cs, ds, es, fs, gs, ss;
++	struct kvm_segment tr, ldt;
++	struct kvm_dtable gdt, idt;
++	__u64 cr0, cr2, cr3, cr4, cr8;
++	__u64 efer;
++	__u64 apic_base;
++	__u64 interrupt_bitmap[KVM_IRQ_BITMAP_SIZE(__u64)];
++};
++
++struct kvm_msr_entry {
++	__u32 index;
++	__u32 reserved;
++	__u64 data;
++};
++
++/* for KVM_GET_MSRS and KVM_SET_MSRS */
++struct kvm_msrs {
++	__u32 nmsrs; /* number of msrs in entries */
++	__u32 pad;
++
++	struct kvm_msr_entry entries[0];
++};
++
++/* for KVM_GET_MSR_INDEX_LIST */
++struct kvm_msr_list {
++	__u32 nmsrs; /* number of msrs in entries */
++	__u32 indices[0];
++};
++
++/* for KVM_TRANSLATE */
++struct kvm_translation {
++	/* in */
++	__u64 linear_address;
++
++	/* out */
++	__u64 physical_address;
++	__u8  valid;
++	__u8  writeable;
++	__u8  usermode;
++	__u8  pad[5];
++};
++
++/* for KVM_INTERRUPT */
++struct kvm_interrupt {
++	/* in */
++	__u32 irq;
++};
++
++struct kvm_breakpoint {
++	__u32 enabled;
++	__u32 padding;
++	__u64 address;
++};
++
++/* for KVM_DEBUG_GUEST */
++struct kvm_debug_guest {
++	/* int */
++	__u32 enabled;
++	__u32 pad;
++	struct kvm_breakpoint breakpoints[4];
++	__u32 singlestep;
++};
++
++/* for KVM_GET_DIRTY_LOG */
++struct kvm_dirty_log {
++	__u32 slot;
++	__u32 padding;
++	union {
++		void __user *dirty_bitmap; /* one bit per page */
++		__u64 padding;
++	};
++};
++
++#define KVMIO 0xAE
++
++/*
++ * ioctls for /dev/kvm fds:
++ */
++#define KVM_GET_API_VERSION       _IO(KVMIO, 1)
++#define KVM_CREATE_VM             _IO(KVMIO, 2) /* returns a VM fd */
++#define KVM_GET_MSR_INDEX_LIST    _IOWR(KVMIO, 15, struct kvm_msr_list)
++
++/*
++ * ioctls for VM fds
++ */
++#define KVM_SET_MEMORY_REGION     _IOW(KVMIO, 10, struct kvm_memory_region)
++/*
++ * KVM_CREATE_VCPU receives as a parameter the vcpu slot, and returns
++ * a vcpu fd.
++ */
++#define KVM_CREATE_VCPU           _IOW(KVMIO, 11, int)
++#define KVM_GET_DIRTY_LOG         _IOW(KVMIO, 12, struct kvm_dirty_log)
++
++/*
++ * ioctls for vcpu fds
++ */
++#define KVM_RUN                   _IOWR(KVMIO, 2, struct kvm_run)
++#define KVM_GET_REGS              _IOR(KVMIO, 3, struct kvm_regs)
++#define KVM_SET_REGS              _IOW(KVMIO, 4, struct kvm_regs)
++#define KVM_GET_SREGS             _IOR(KVMIO, 5, struct kvm_sregs)
++#define KVM_SET_SREGS             _IOW(KVMIO, 6, struct kvm_sregs)
++#define KVM_TRANSLATE             _IOWR(KVMIO, 7, struct kvm_translation)
++#define KVM_INTERRUPT             _IOW(KVMIO, 8, struct kvm_interrupt)
++#define KVM_DEBUG_GUEST           _IOW(KVMIO, 9, struct kvm_debug_guest)
++#define KVM_GET_MSRS              _IOWR(KVMIO, 13, struct kvm_msrs)
++#define KVM_SET_MSRS              _IOW(KVMIO, 14, struct kvm_msrs)
++
++#endif
+--- qemu-0.9.0/kvmctl.c.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/kvmctl.c	2007-03-14 13:22:34.000000000 +0100
+@@ -0,0 +1,809 @@
++/*
++ * Kernel-based Virtual Machine control library
++ *
++ * This library provides an API to control the kvm hardware virtualization
++ * module.
++ *
++ * Copyright (C) 2006 Qumranet
++ *
++ * Authors:
++ *
++ *  Avi Kivity <avi@qumranet.com>
++ *  Yaniv Kamay <yaniv@qumranet.com>
++ *
++ * This work is licensed under the GNU LGPL license, version 2.
++ */
++
++#include <unistd.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/mman.h>
++#include <string.h>
++#include <errno.h>
++#include <sys/ioctl.h>
++#include "kvmctl.h"
++
++#define EXPECTED_KVM_API_VERSION 4
++
++#if EXPECTED_KVM_API_VERSION != KVM_API_VERSION
++#error libkvm: userspace and kernel version mismatch
++#endif
++
++#define PAGE_SIZE 4096ul
++
++/* FIXME: share this number with kvm */
++/* FIXME: or dynamically alloc/realloc regions */
++#define KVM_MAX_NUM_MEM_REGIONS 4u
++
++/**
++ * \brief The KVM context
++ *
++ * The verbose KVM context
++ */
++struct kvm_context {
++	/// Filedescriptor to /dev/kvm
++	int fd;
++	int vm_fd;
++	int vcpu_fd[1];
++	/// Callbacks that KVM uses to emulate various unvirtualizable functionality
++	struct kvm_callbacks *callbacks;
++	void *opaque;
++	/// A pointer to the memory used as the physical memory for the guest
++	void *physical_memory;
++	/// is dirty pages logging enabled for all regions or not
++	int dirty_pages_log_all;
++	/// memory regions parameters
++	struct kvm_memory_region mem_regions[KVM_MAX_NUM_MEM_REGIONS];
++};
++
++struct translation_cache {
++	unsigned long linear;
++	void *physical;
++};
++
++static void translation_cache_init(struct translation_cache *tr)
++{
++	tr->physical = 0;
++}
++
++static int translate(kvm_context_t kvm, int vcpu, struct translation_cache *tr,
++		     unsigned long linear, void **physical)
++{
++	unsigned long page = linear & ~(PAGE_SIZE-1);
++	unsigned long offset = linear & (PAGE_SIZE-1);
++
++	if (!(tr->physical && tr->linear == page)) {
++		struct kvm_translation kvm_tr;
++		int r;
++
++		kvm_tr.linear_address = page;
++		
++		r = ioctl(kvm->vcpu_fd[vcpu], KVM_TRANSLATE, &kvm_tr);
++		if (r == -1)
++			return -errno;
++
++		if (!kvm_tr.valid)
++			return -EFAULT;
++
++		tr->linear = page;
++		tr->physical = kvm->physical_memory + kvm_tr.physical_address;
++	}
++	*physical = tr->physical + offset;
++	return 0;
++}
++
++/*
++ * memory regions parameters
++ */
++static void kvm_memory_region_save_params(kvm_context_t kvm, 
++					 struct kvm_memory_region *mem)
++{
++	if (!mem || (mem->slot >= KVM_MAX_NUM_MEM_REGIONS)) {
++		fprintf(stderr, "BUG: %s: invalid parameters\n", __FUNCTION__);
++		return;
++	}
++	kvm->mem_regions[mem->slot] = *mem;
++}
++
++static void kvm_memory_region_clear_params(kvm_context_t kvm, int regnum)
++{
++	if (regnum >= KVM_MAX_NUM_MEM_REGIONS) {
++		fprintf(stderr, "BUG: %s: invalid parameters\n", __FUNCTION__);
++		return;
++	}
++	kvm->mem_regions[regnum].memory_size = 0;
++}
++
++/* 
++ * dirty pages logging control 
++ */
++static int kvm_dirty_pages_log_change(kvm_context_t kvm, int regnum, __u32 flag)
++{
++	int r;
++	struct kvm_memory_region *mem;
++
++	if (regnum >= KVM_MAX_NUM_MEM_REGIONS) {
++		fprintf(stderr, "BUG: %s: invalid parameters\n", __FUNCTION__);
++		return 1;
++	}
++	mem = &kvm->mem_regions[regnum];
++	if (mem->memory_size == 0) /* not used */
++		return 0;
++	if (mem->flags & KVM_MEM_LOG_DIRTY_PAGES) /* log already enabled */
++		return 0;
++	mem->flags |= flag;  /* temporary turn on flag */
++	r = ioctl(kvm->vm_fd, KVM_SET_MEMORY_REGION, mem);
++	mem->flags &= ~flag; /* back to previous value */
++	if (r == -1) {
++		fprintf(stderr, "%s: %m\n", __FUNCTION__);
++	}
++	return r;
++}
++
++static int kvm_dirty_pages_log_change_all(kvm_context_t kvm, __u32 flag)
++{
++	int i, r;
++
++	for (i=r=0; i<KVM_MAX_NUM_MEM_REGIONS && r==0; i++) {
++		r = kvm_dirty_pages_log_change(kvm, i, flag);
++	}
++	return r;
++}
++
++/**
++ * Enable dirty page logging for all memory regions
++ */
++int kvm_dirty_pages_log_enable_all(kvm_context_t kvm)
++{
++	if (kvm->dirty_pages_log_all)
++		return 0;
++	kvm->dirty_pages_log_all = 1;
++	return kvm_dirty_pages_log_change_all(kvm, KVM_MEM_LOG_DIRTY_PAGES);
++}
++
++/**
++ * Enable dirty page logging only for memory regions that were created with
++ *     dirty logging enabled (disable for all other memory regions).
++ */
++int kvm_dirty_pages_log_reset(kvm_context_t kvm)
++{
++	if (!kvm->dirty_pages_log_all)
++		return 0;
++	kvm->dirty_pages_log_all = 0;
++	return kvm_dirty_pages_log_change_all(kvm, 0);
++}
++
++
++kvm_context_t kvm_init(struct kvm_callbacks *callbacks,
++		       void *opaque)
++{
++	int fd;
++	kvm_context_t kvm;
++	int r;
++
++	fd = open("/dev/kvm", O_RDWR);
++	if (fd == -1) {
++		perror("open /dev/kvm");
++		return NULL;
++	}
++	r = ioctl(fd, KVM_GET_API_VERSION, 0);
++	if (r == -1) {
++	    fprintf(stderr, "kvm kernel version too old\n");
++	    goto out_close;
++	}
++	if (r < EXPECTED_KVM_API_VERSION) {
++	    fprintf(stderr, "kvm kernel version too old\n");
++	    goto out_close;
++	}
++	if (r > EXPECTED_KVM_API_VERSION) {
++	    fprintf(stderr, "kvm userspace version too old\n");
++	    goto out_close;
++	}
++	kvm = malloc(sizeof(*kvm));
++	kvm->fd = fd;
++	kvm->vm_fd = -1;
++	kvm->callbacks = callbacks;
++	kvm->opaque = opaque;
++	kvm->dirty_pages_log_all = 0;
++	memset(&kvm->mem_regions, 0, sizeof(kvm->mem_regions));
++
++	return kvm;
++ out_close:
++	close(fd);
++	return NULL;
++}
++
++void kvm_finalize(kvm_context_t kvm)
++{
++    	if (kvm->vcpu_fd[0] != -1)
++		close(kvm->vcpu_fd[0]);
++    	if (kvm->vm_fd != -1)
++		close(kvm->vm_fd);
++	close(kvm->fd);
++	free(kvm);
++}
++
++int kvm_create(kvm_context_t kvm, unsigned long memory, void **vm_mem)
++{
++	unsigned long dosmem = 0xa0000;
++	unsigned long exmem = 0xc0000;
++	int fd = kvm->fd;
++	int r;
++	struct kvm_memory_region low_memory = {
++		.slot = 3,
++		.memory_size = memory  < dosmem ? memory : dosmem,
++		.guest_phys_addr = 0,
++	};
++	struct kvm_memory_region extended_memory = {
++		.slot = 0,
++		.memory_size = memory < exmem ? 0 : memory - exmem,
++		.guest_phys_addr = exmem,
++	};
++
++	kvm->vcpu_fd[0] = -1;
++
++	fd = ioctl(fd, KVM_CREATE_VM, 0);
++	if (fd == -1) {
++		fprintf(stderr, "kvm_create_vm: %m\n");
++		return -1;
++	}
++	kvm->vm_fd = fd;
++
++	/* 640K should be enough. */
++	r = ioctl(fd, KVM_SET_MEMORY_REGION, &low_memory);
++	if (r == -1) {
++		fprintf(stderr, "kvm_create_memory_region: %m\n");
++		return -1;
++	}
++	if (extended_memory.memory_size) {
++		r = ioctl(fd, KVM_SET_MEMORY_REGION, &extended_memory);
++		if (r == -1) {
++			fprintf(stderr, "kvm_create_memory_region: %m\n");
++			return -1;
++		}
++	}
++
++	kvm_memory_region_save_params(kvm, &low_memory);
++	kvm_memory_region_save_params(kvm, &extended_memory);
++
++	*vm_mem = mmap(0, memory, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
++	if (*vm_mem == MAP_FAILED) {
++		fprintf(stderr, "mmap: %m\n");
++		return -1;
++	}
++	kvm->physical_memory = *vm_mem;
++
++	r = ioctl(fd, KVM_CREATE_VCPU, 0);
++	if (r == -1) {
++		fprintf(stderr, "kvm_create_vcpu: %m\n");
++		return -1;
++	}
++	kvm->vcpu_fd[0] = r;
++	return 0;
++}
++
++void *kvm_create_phys_mem(kvm_context_t kvm, unsigned long phys_start, 
++			  unsigned long len, int slot, int log, int writable)
++{
++	void *ptr;
++	int r;
++	int fd = kvm->vm_fd;
++	int prot = PROT_READ;
++	struct kvm_memory_region memory = {
++		.slot = slot,
++		.memory_size = len,
++		.guest_phys_addr = phys_start,
++		.flags = log ? KVM_MEM_LOG_DIRTY_PAGES : 0,
++	};
++
++	r = ioctl(fd, KVM_SET_MEMORY_REGION, &memory);
++	if (r == -1)
++	    return 0;
++
++	kvm_memory_region_save_params(kvm, &memory);
++
++	if (writable)
++		prot |= PROT_WRITE;
++
++	ptr = mmap(0, len, prot, MAP_SHARED, fd, phys_start);
++	if (ptr == MAP_FAILED)
++		return 0;
++	return ptr;
++}
++
++void kvm_destroy_phys_mem(kvm_context_t kvm, unsigned long phys_start, 
++			  unsigned long len)
++{
++	//for each memory region in (phys_start, phys_start+len) do
++	//    kvm_memory_region_clear_params(kvm, region);
++	kvm_memory_region_clear_params(kvm, 0); /* avoid compiler warning */
++	printf("kvm_destroy_phys_mem: implement me\n");
++	exit(1);
++}
++
++
++int kvm_get_dirty_pages(kvm_context_t kvm, int slot, void *buf)
++{
++	int r;
++	struct kvm_dirty_log log = {
++		.slot = slot,
++	};
++
++	log.dirty_bitmap = buf;
++
++	r = ioctl(kvm->vm_fd, KVM_GET_DIRTY_LOG, &log);
++	if (r == -1)
++		return -errno;
++	return 0;
++}
++
++static int more_io(struct kvm_run *run, int first_time)
++{
++	if (!run->io.rep)
++		return first_time;
++	else
++		return run->io.count != 0;
++}
++
++static int handle_io(kvm_context_t kvm, struct kvm_run *run, int vcpu)
++{
++	uint16_t addr = run->io.port;
++	struct kvm_regs regs;
++	int first_time = 1;
++	int delta;
++	struct translation_cache tr;
++	int _in = (run->io.direction == KVM_EXIT_IO_IN);
++	int r;
++
++	translation_cache_init(&tr);
++
++	if (run->io.string || _in) {
++		r = ioctl(kvm->vcpu_fd[vcpu], KVM_GET_REGS, &regs);
++		if (r == -1)
++			return -errno;
++	}
++
++	delta = run->io.string_down ? -run->io.size : run->io.size;
++
++	while (more_io(run, first_time)) {
++		void *value_addr;
++
++		if (!run->io.string) {
++			if (_in)
++				value_addr = &regs.rax;
++			else
++				value_addr = &run->io.value;
++		} else {
++			r = translate(kvm, vcpu, &tr, run->io.address, 
++				      &value_addr);
++			if (r) {
++				fprintf(stderr, "failed translating I/O address %llx\n",
++					run->io.address);
++				return r;
++			}
++		}
++
++		switch (run->io.direction) {
++		case KVM_EXIT_IO_IN: {
++			switch (run->io.size) {
++			case 1: {
++				uint8_t value;
++				r = kvm->callbacks->inb(kvm->opaque, addr, &value);
++				*(uint8_t *)value_addr = value;
++				break;
++			}
++			case 2: {
++				uint16_t value;
++				r = kvm->callbacks->inw(kvm->opaque, addr, &value);
++				*(uint16_t *)value_addr = value;
++				break;
++			}
++			case 4: {
++				uint32_t value;
++				r = kvm->callbacks->inl(kvm->opaque, addr, &value);
++				*(uint32_t *)value_addr = value;
++				break;
++			}
++			default:
++				fprintf(stderr, "bad I/O size %d\n", run->io.size);
++				return -EMSGSIZE;
++			}
++			break;
++		}
++		case KVM_EXIT_IO_OUT:
++			switch (run->io.size) {
++			case 1:
++				r = kvm->callbacks->outb(kvm->opaque, addr,
++						     *(uint8_t *)value_addr);
++				break;
++			case 2:
++				r = kvm->callbacks->outw(kvm->opaque, addr,
++						     *(uint16_t *)value_addr);
++				break;
++			case 4:
++				r = kvm->callbacks->outl(kvm->opaque, addr,
++						     *(uint32_t *)value_addr);
++				break;
++			default:
++				fprintf(stderr, "bad I/O size %d\n", run->io.size);
++				return -EMSGSIZE;
++			}
++			break;
++		default:
++			fprintf(stderr, "bad I/O direction %d\n", run->io.direction);
++			return -EPROTO;
++		}
++		if (run->io.string) {
++			run->io.address += delta;
++			switch (run->io.direction) {
++			case KVM_EXIT_IO_IN:  regs.rdi += delta; break;
++			case KVM_EXIT_IO_OUT: regs.rsi += delta; break;
++			}
++			if (run->io.rep) {
++				--regs.rcx;
++				--run->io.count;
++			}
++		}
++		first_time = 0;
++		if (r) {
++			int savedret = r;
++			r = ioctl(kvm->vcpu_fd[vcpu], KVM_SET_REGS, &regs);
++			if (r == -1)
++				return -errno;
++
++			return savedret;
++		}
++	}
++
++	if (run->io.string || _in) {
++		r = ioctl(kvm->vcpu_fd[vcpu], KVM_SET_REGS, &regs);
++		if (r == -1)
++			return -errno;
++
++	}
++
++	run->emulated = 1;
++	return 0;
++}
++
++int handle_debug(kvm_context_t kvm, struct kvm_run *run, int vcpu)
++{
++	return kvm->callbacks->debug(kvm->opaque, vcpu);
++}
++
++int kvm_get_regs(kvm_context_t kvm, int vcpu, struct kvm_regs *regs)
++{
++    return ioctl(kvm->vcpu_fd[vcpu], KVM_GET_REGS, regs);
++}
++
++int kvm_set_regs(kvm_context_t kvm, int vcpu, struct kvm_regs *regs)
++{
++    return ioctl(kvm->vcpu_fd[vcpu], KVM_SET_REGS, regs);
++}
++
++int kvm_get_sregs(kvm_context_t kvm, int vcpu, struct kvm_sregs *sregs)
++{
++    return ioctl(kvm->vcpu_fd[vcpu], KVM_GET_SREGS, sregs);
++}
++
++int kvm_set_sregs(kvm_context_t kvm, int vcpu, struct kvm_sregs *sregs)
++{
++    return ioctl(kvm->vcpu_fd[vcpu], KVM_SET_SREGS, sregs);
++}
++
++/*
++ * Returns available msr list.  User must free.
++ */
++struct kvm_msr_list *kvm_get_msr_list(kvm_context_t kvm)
++{
++    struct kvm_msr_list sizer, *msrs;
++    int r, e;
++
++    sizer.nmsrs = 0;
++    r = ioctl(kvm->fd, KVM_GET_MSR_INDEX_LIST, &sizer);
++    if (r == -1 && errno != E2BIG)
++	return 0;
++    msrs = malloc(sizeof *msrs + sizer.nmsrs * sizeof *msrs->indices);
++    if (!msrs) {
++	errno = ENOMEM;
++	return 0;
++    }
++    msrs->nmsrs = sizer.nmsrs;
++    r = ioctl(kvm->fd, KVM_GET_MSR_INDEX_LIST, msrs);
++    if (r == -1) {
++	e = errno;
++	free(msrs);
++	errno = e;
++	return 0;
++    }
++    return msrs;
++}
++
++int kvm_get_msrs(kvm_context_t kvm, int vcpu, struct kvm_msr_entry *msrs,
++		 int n)
++{
++    struct kvm_msrs *kmsrs = malloc(sizeof *kmsrs + n * sizeof *msrs);
++    int r, e;
++
++    if (!kmsrs) {
++	errno = ENOMEM;
++	return -1;
++    }
++    kmsrs->nmsrs = n;
++    memcpy(kmsrs->entries, msrs, n * sizeof *msrs);
++    r = ioctl(kvm->vcpu_fd[vcpu], KVM_GET_MSRS, kmsrs);
++    e = errno;
++    memcpy(msrs, kmsrs->entries, n * sizeof *msrs);
++    free(kmsrs);
++    errno = e;
++    return r;
++}
++
++int kvm_set_msrs(kvm_context_t kvm, int vcpu, struct kvm_msr_entry *msrs,
++		 int n)
++{
++    struct kvm_msrs *kmsrs = malloc(sizeof *kmsrs + n * sizeof *msrs);
++    int r, e;
++
++    if (!kmsrs) {
++	errno = ENOMEM;
++	return -1;
++    }
++    kmsrs->nmsrs = n;
++    memcpy(kmsrs->entries, msrs, n * sizeof *msrs);
++    r = ioctl(kvm->vcpu_fd[vcpu], KVM_SET_MSRS, kmsrs);
++    e = errno;
++    free(kmsrs);
++    errno = e;
++    return r;
++}
++
++static void print_seg(FILE *file, const char *name, struct kvm_segment *seg)
++{
++    	fprintf(stderr,
++		"%s %04x (%08llx/%08x p %d dpl %d db %d s %d type %x l %d"
++		" g %d avl %d)\n",
++		name, seg->selector, seg->base, seg->limit, seg->present,
++		seg->dpl, seg->db, seg->s, seg->type, seg->l, seg->g,
++		seg->avl);
++}
++
++static void print_dt(FILE *file, const char *name, struct kvm_dtable *dt)
++{
++    	fprintf(stderr, "%s %llx/%x\n", name, dt->base, dt->limit);
++}
++
++void kvm_show_regs(kvm_context_t kvm, int vcpu)
++{
++	int fd = kvm->vcpu_fd[vcpu];
++	struct kvm_regs regs;
++	struct kvm_sregs sregs;
++	int r;
++
++	r = ioctl(fd, KVM_GET_REGS, &regs);
++	if (r == -1) {
++		perror("KVM_GET_REGS");
++		return;
++	}
++	fprintf(stderr,
++		"rax %016llx rbx %016llx rcx %016llx rdx %016llx\n"
++		"rsi %016llx rdi %016llx rsp %016llx rbp %016llx\n"
++		"r8  %016llx r9  %016llx r10 %016llx r11 %016llx\n"
++		"r12 %016llx r13 %016llx r14 %016llx r15 %016llx\n"
++		"rip %016llx rflags %08llx\n",
++		regs.rax, regs.rbx, regs.rcx, regs.rdx,
++		regs.rsi, regs.rdi, regs.rsp, regs.rbp,
++		regs.r8,  regs.r9,  regs.r10, regs.r11,
++		regs.r12, regs.r13, regs.r14, regs.r15,
++		regs.rip, regs.rflags);
++	r = ioctl(fd, KVM_GET_SREGS, &sregs);
++	if (r == -1) {
++		perror("KVM_GET_SREGS");
++		return;
++	}
++	print_seg(stderr, "cs", &sregs.cs);
++	print_seg(stderr, "ds", &sregs.ds);
++	print_seg(stderr, "es", &sregs.es);
++	print_seg(stderr, "ss", &sregs.ss);
++	print_seg(stderr, "fs", &sregs.fs);
++	print_seg(stderr, "gs", &sregs.gs);
++	print_seg(stderr, "tr", &sregs.tr);
++	print_seg(stderr, "ldt", &sregs.ldt);
++	print_dt(stderr, "gdt", &sregs.gdt);
++	print_dt(stderr, "idt", &sregs.idt);
++	fprintf(stderr, "cr0 %llx cr2 %llx cr3 %llx cr4 %llx cr8 %llx"
++		" efer %llx\n",
++		sregs.cr0, sregs.cr2, sregs.cr3, sregs.cr4, sregs.cr8,
++		sregs.efer);
++}
++
++static int handle_cpuid(kvm_context_t kvm, struct kvm_run *run, int vcpu)
++{
++	struct kvm_regs regs;
++	uint32_t orig_eax;
++	uint64_t rax, rbx, rcx, rdx;
++	int r;
++
++	kvm_get_regs(kvm, vcpu, &regs);
++	orig_eax = regs.rax;
++	rax = regs.rax;
++	rbx = regs.rbx;
++	rcx = regs.rcx;
++	rdx = regs.rdx;
++	r = kvm->callbacks->cpuid(kvm->opaque, &rax, &rbx, &rcx, &rdx);
++	regs.rax = rax;
++	regs.rbx = rbx;
++	regs.rcx = rcx;
++	regs.rdx = rdx;
++	if (orig_eax == 1)
++		regs.rdx &= ~(1ull << 12); /* disable mtrr support */
++	kvm_set_regs(kvm, vcpu, &regs);
++	run->emulated = 1;
++	return r;
++}
++
++static int handle_mmio(kvm_context_t kvm, struct kvm_run *kvm_run)
++{
++	unsigned long addr = kvm_run->mmio.phys_addr;
++	void *data = kvm_run->mmio.data;
++	int r = -1;
++
++	if (kvm_run->mmio.is_write) {
++		switch (kvm_run->mmio.len) {
++		case 1:
++			r = kvm->callbacks->writeb(kvm->opaque, addr, *(uint8_t *)data);
++			break;
++		case 2:
++			r = kvm->callbacks->writew(kvm->opaque, addr, *(uint16_t *)data);
++			break;
++		case 4:
++			r = kvm->callbacks->writel(kvm->opaque, addr, *(uint32_t *)data);
++			break;
++		case 8:
++			r = kvm->callbacks->writeq(kvm->opaque, addr, *(uint64_t *)data);
++			break;
++		}
++	} else {
++		switch (kvm_run->mmio.len) {
++		case 1:
++			r = kvm->callbacks->readb(kvm->opaque, addr, (uint8_t *)data);
++			break;
++		case 2:
++			r = kvm->callbacks->readw(kvm->opaque, addr, (uint16_t *)data);
++			break;
++		case 4:
++			r = kvm->callbacks->readl(kvm->opaque, addr, (uint32_t *)data);
++			break;
++		case 8:
++			r = kvm->callbacks->readq(kvm->opaque, addr, (uint64_t *)data);
++			break;
++		}
++		kvm_run->mmio_completed = 1;
++	}
++	return r;
++}
++
++static int handle_io_window(kvm_context_t kvm, struct kvm_run *kvm_run)
++{
++	return kvm->callbacks->io_window(kvm->opaque);
++}
++
++static int handle_halt(kvm_context_t kvm, struct kvm_run *kvm_run, int vcpu)
++{
++	return kvm->callbacks->halt(kvm->opaque, vcpu);
++}
++
++static int handle_shutdown(kvm_context_t kvm, struct kvm_run *kvm_run,
++			   int vcpu)
++{
++	return kvm->callbacks->shutdown(kvm->opaque, vcpu);
++}
++
++int try_push_interrupts(kvm_context_t kvm)
++{
++	return kvm->callbacks->try_push_interrupts(kvm->opaque);
++}
++
++static void post_kvm_run(kvm_context_t kvm, struct kvm_run *kvm_run)
++{
++	kvm->callbacks->post_kvm_run(kvm->opaque, kvm_run);
++}
++
++static void pre_kvm_run(kvm_context_t kvm, struct kvm_run *kvm_run)
++{
++	kvm->callbacks->pre_kvm_run(kvm->opaque, kvm_run);
++}
++
++int kvm_run(kvm_context_t kvm, int vcpu)
++{
++	int r;
++	int fd = kvm->vcpu_fd[vcpu];
++	struct kvm_run kvm_run = {
++		.emulated = 0,
++		.mmio_completed = 0,
++	};
++
++again:
++	kvm_run.request_interrupt_window = try_push_interrupts(kvm);
++	pre_kvm_run(kvm, &kvm_run);
++	r = ioctl(fd, KVM_RUN, &kvm_run);
++	post_kvm_run(kvm, &kvm_run);
++
++	kvm_run.emulated = 0;
++	kvm_run.mmio_completed = 0;
++	if (r == -1 && errno != EINTR) {
++		r = -errno;
++		printf("kvm_run: %m\n");
++		return r;
++	}
++	if (r == -1) {
++		r = handle_io_window(kvm, &kvm_run);
++		goto more;
++	}
++	switch (kvm_run.exit_type) {
++	case KVM_EXIT_TYPE_FAIL_ENTRY:
++		fprintf(stderr, "kvm_run: failed entry, reason %u\n", 
++			kvm_run.exit_reason & 0xffff);
++		return -ENOEXEC;
++		break;
++	case KVM_EXIT_TYPE_VM_EXIT:
++		switch (kvm_run.exit_reason) {
++		case KVM_EXIT_UNKNOWN:
++			fprintf(stderr, "unhandled vm exit:  0x%x\n", 
++			       kvm_run.hw.hardware_exit_reason);
++			kvm_show_regs(kvm, vcpu);
++			abort();
++			break;
++		case KVM_EXIT_EXCEPTION:
++			fprintf(stderr, "exception %d (%x)\n", 
++			       kvm_run.ex.exception,
++			       kvm_run.ex.error_code);
++			kvm_show_regs(kvm, vcpu);
++			abort();
++			break;
++		case KVM_EXIT_IO:
++			r = handle_io(kvm, &kvm_run, vcpu);
++			break;
++		case KVM_EXIT_CPUID:
++			r = handle_cpuid(kvm, &kvm_run, vcpu);
++			break;
++		case KVM_EXIT_DEBUG:
++			r = handle_debug(kvm, &kvm_run, vcpu);
++			break;
++		case KVM_EXIT_MMIO:
++			r = handle_mmio(kvm, &kvm_run);
++			break;
++		case KVM_EXIT_HLT:
++			r = handle_halt(kvm, &kvm_run, vcpu);
++			break;
++		case KVM_EXIT_IRQ_WINDOW_OPEN:
++			break;
++		case KVM_EXIT_SHUTDOWN:
++			r = handle_shutdown(kvm, &kvm_run, vcpu);
++			break;
++		default:
++			fprintf(stderr, "unhandled vm exit: 0x%x\n", kvm_run.exit_reason);
++			kvm_show_regs(kvm, vcpu);
++			abort();
++			break;
++		}
++	}
++more:
++	if (!r)
++		goto again;
++	return r;
++}
++
++int kvm_inject_irq(kvm_context_t kvm, int vcpu, unsigned irq)
++{
++	struct kvm_interrupt intr;
++
++	intr.irq = irq;
++	return ioctl(kvm->vcpu_fd[vcpu], KVM_INTERRUPT, &intr);
++}
++
++int kvm_guest_debug(kvm_context_t kvm, int vcpu, struct kvm_debug_guest *dbg)
++{
++	return ioctl(kvm->vcpu_fd[vcpu], KVM_DEBUG_GUEST, dbg);
++}
+--- qemu-0.9.0/kvmctl.h.kvm	2007-03-14 13:22:34.000000000 +0100
++++ qemu-0.9.0/kvmctl.h	2007-03-14 13:22:34.000000000 +0100
+@@ -0,0 +1,269 @@
++/** \file kvmctl.h
++ * libkvm API
++ */
++
++#ifndef KVMCTL_H
++#define KVMCTL_H
++
++#define __user /* temporary, until installed via make headers_install */
++#include "kvm.h"
++#include <stdint.h>
++
++struct kvm_context;
++
++typedef struct kvm_context *kvm_context_t;
++
++/*!
++ * \brief KVM callbacks structure
++ *
++ * This structure holds pointers to various functions that KVM will call
++ * when it encounters something that cannot be virtualized, such as
++ * accessing hardware devices via MMIO or regular IO.
++ */
++struct kvm_callbacks {
++    int (*cpuid)(void *opaque, 
++		  uint64_t *rax, uint64_t *rbx, uint64_t *rcx, uint64_t *rdx);
++	/// For 8bit IO reads from the guest (Usually when executing 'inb')
++    int (*inb)(void *opaque, uint16_t addr, uint8_t *data);
++	/// For 16bit IO reads from the guest (Usually when executing 'inw')
++    int (*inw)(void *opaque, uint16_t addr, uint16_t *data);
++	/// For 32bit IO reads from the guest (Usually when executing 'inl')
++    int (*inl)(void *opaque, uint16_t addr, uint32_t *data);
++	/// For 8bit IO writes from the guest (Usually when executing 'outb')
++    int (*outb)(void *opaque, uint16_t addr, uint8_t data);
++	/// For 16bit IO writes from the guest (Usually when executing 'outw')
++    int (*outw)(void *opaque, uint16_t addr, uint16_t data);
++	/// For 32bit IO writes from the guest (Usually when executing 'outl')
++    int (*outl)(void *opaque, uint16_t addr, uint32_t data);
++	/// For 8bit memory reads from unmapped memory (For MMIO devices)
++    int (*readb)(void *opaque, uint64_t addr, uint8_t *data);
++	/// For 16bit memory reads from unmapped memory (For MMIO devices)
++    int (*readw)(void *opaque, uint64_t addr, uint16_t *data);
++	/// For 32bit memory reads from unmapped memory (For MMIO devices)
++    int (*readl)(void *opaque, uint64_t addr, uint32_t *data);
++	/// For 64bit memory reads from unmapped memory (For MMIO devices)
++    int (*readq)(void *opaque, uint64_t addr, uint64_t *data);
++	/// For 8bit memory writes to unmapped memory (For MMIO devices)
++    int (*writeb)(void *opaque, uint64_t addr, uint8_t data);
++	/// For 16bit memory writes to unmapped memory (For MMIO devices)
++    int (*writew)(void *opaque, uint64_t addr, uint16_t data);
++	/// For 32bit memory writes to unmapped memory (For MMIO devices)
++    int (*writel)(void *opaque, uint64_t addr, uint32_t data);
++	/// For 64bit memory writes to unmapped memory (For MMIO devices)
++    int (*writeq)(void *opaque, uint64_t addr, uint64_t data);
++    int (*debug)(void *opaque, int vcpu);
++	/*!
++	 * \brief Called when the VCPU issues an 'hlt' instruction.
++	 *
++	 * Typically, you should yeild here to prevent 100% CPU utilization
++	 * on the host CPU.
++	 */
++    int (*halt)(void *opaque, int vcpu);
++    int (*shutdown)(void *opaque, int vcpu);
++    int (*io_window)(void *opaque);
++    int (*try_push_interrupts)(void *opaque);
++    void (*post_kvm_run)(void *opaque, struct kvm_run *kvm_run);
++    void (*pre_kvm_run)(void *opaque, struct kvm_run *kvm_run);
++};
++
++/*!
++ * \brief Create new KVM context
++ *
++ * This creates a new kvm_context. A KVM context is a small area of data that
++ * holds information about the KVM instance that gets created by this call.\n
++ * This should always be your first call to KVM.
++ *
++ * \param callbacks Pointer to a valid kvm_callbacks structure
++ * \param opaque Not used
++ * \return NULL on failure
++ */
++kvm_context_t kvm_init(struct kvm_callbacks *callbacks,
++		       void *opaque);
++
++/*!
++ * \brief Cleanup the KVM context
++ *
++ * Should always be called when closing down KVM.\n
++ * Exception: If kvm_init() fails, this function should not be called, as the
++ * context would be invalid
++ *
++ * \param kvm Pointer to the kvm_context that is to be freed
++ */
++void kvm_finalize(kvm_context_t kvm);
++
++/*!
++ * \brief Create new virtual machine
++ *
++ * This creates a new virtual machine, maps physical RAM to it, and creates a
++ * virtual CPU for it.\n
++ * \n
++ * Memory gets mapped for addresses 0->0xA0000, 0xC0000->phys_mem_bytes
++ *
++ * \param kvm Pointer to the current kvm_context
++ * \param phys_mem_bytes The amount of physical ram you want the VM to have
++ * \param phys_mem This pointer will be set to point to the memory that
++ * kvm_create allocates for physical RAM
++ * \return 0 on success
++ */
++int kvm_create(kvm_context_t kvm,
++	       unsigned long phys_mem_bytes,
++	       void **phys_mem);
++
++/*!
++ * \brief Start the VCPU
++ *
++ * This starts the VCPU and virtualization is started.\n
++ * \n
++ * This function will not return until any of these conditions are met:
++ * - An IO/MMIO handler does not return "0"
++ * - An exception that neither the guest OS, nor KVM can handle occurs
++ *
++ * \note This function will call the callbacks registered in kvm_init()
++ * to emulate those functions
++ * \note If you at any point want to interrupt the VCPU, kvm_run() will
++ * listen to the EINTR signal. This allows you to simulate external interrupts
++ * and asyncronous IO.
++ *
++ * \param kvm Pointer to the current kvm_context
++ * \param vcpu Which virtual CPU should be started
++ * \return 0 on success, but you really shouldn't expect this function to
++ * return except for when an error has occured, or when you have sent it
++ * an EINTR signal.
++ */
++int kvm_run(kvm_context_t kvm, int vcpu);
++
++/*!
++ * \brief Read VCPU registers
++ *
++ * This gets the GP registers from the VCPU and outputs them
++ * into a kvm_regs structure
++ *
++ * \note This function returns a \b copy of the VCPUs registers.\n
++ * If you wish to modify the VCPUs GP registers, you should call kvm_set_regs()
++ *
++ * \param kvm Pointer to the current kvm_context
++ * \param vcpu Which virtual CPU should get dumped
++ * \param regs Pointer to a kvm_regs which will be populated with the VCPUs
++ * registers values
++ * \return 0 on success
++ */
++int kvm_get_regs(kvm_context_t kvm, int vcpu, struct kvm_regs *regs);
++
++/*!
++ * \brief Write VCPU registers
++ *
++ * This sets the GP registers on the VCPU from a kvm_regs structure
++ *
++ * \note When this function returns, the regs pointer and the data it points to
++ * can be discarded
++ * \param kvm Pointer to the current kvm_context
++ * \param vcpu Which virtual CPU should get dumped
++ * \param regs Pointer to a kvm_regs which will be populated with the VCPUs
++ * registers values
++ * \return 0 on success
++ */
++int kvm_set_regs(kvm_context_t kvm, int vcpu, struct kvm_regs *regs);
++
++/*!
++ * \brief Read VCPU system registers
++ *
++ * This gets the non-GP registers from the VCPU and outputs them
++ * into a kvm_sregs structure
++ *
++ * \note This function returns a \b copy of the VCPUs registers.\n
++ * If you wish to modify the VCPUs non-GP registers, you should call
++ * kvm_set_sregs()
++ *
++ * \param kvm Pointer to the current kvm_context
++ * \param vcpu Which virtual CPU should get dumped
++ * \param regs Pointer to a kvm_sregs which will be populated with the VCPUs
++ * registers values
++ * \return 0 on success
++ */
++int kvm_get_sregs(kvm_context_t kvm, int vcpu, struct kvm_sregs *regs);
++
++/*!
++ * \brief Write VCPU system registers
++ *
++ * This sets the non-GP registers on the VCPU from a kvm_sregs structure
++ *
++ * \note When this function returns, the regs pointer and the data it points to
++ * can be discarded
++ * \param kvm Pointer to the current kvm_context
++ * \param vcpu Which virtual CPU should get dumped
++ * \param regs Pointer to a kvm_sregs which will be populated with the VCPUs
++ * registers values
++ * \return 0 on success
++ */
++int kvm_set_sregs(kvm_context_t kvm, int vcpu, struct kvm_sregs *regs);
++
++struct kvm_msr_list *kvm_get_msr_list(kvm_context_t);
++int kvm_get_msrs(kvm_context_t, int vcpu, struct kvm_msr_entry *msrs, int n);
++int kvm_set_msrs(kvm_context_t, int vcpu, struct kvm_msr_entry *msrs, int n);
++
++/*!
++ * \brief Simulate an external vectored interrupt
++ *
++ * This allows you to simulate an external vectored interrupt.
++ *
++ * \param kvm Pointer to the current kvm_context
++ * \param vcpu Which virtual CPU should get dumped
++ * \param irq Vector number
++ * \return 0 on success
++ */
++int kvm_inject_irq(kvm_context_t kvm, int vcpu, unsigned irq);
++int kvm_guest_debug(kvm_context_t, int vcpu, struct kvm_debug_guest *dbg);
++
++/*!
++ * \brief Dump all VCPU information
++ *
++ * This dumps \b all the information that KVM has about a virtual CPU, namely:
++ * - GP Registers
++ * - System registers (selectors, descriptors, etc)
++ * - VMCS Data
++ * - MSRS
++ * - Pending interrupts
++ *
++ * \param kvm Pointer to the current kvm_context
++ * \param vcpu Which virtual CPU should get dumped
++ * \return 0 on success
++ */
++int kvm_dump_vcpu(kvm_context_t kvm, int vcpu);
++
++/*!
++ * \brief Dump VCPU registers
++ *
++ * This dumps some of the information that KVM has about a virtual CPU, namely:
++ * - GP Registers
++ *
++ * A much more verbose version of this is available as kvm_dump_vcpu()
++ *
++ * \param kvm Pointer to the current kvm_context
++ * \param vcpu Which virtual CPU should get dumped
++ * \return 0 on success
++ */
++void kvm_show_regs(kvm_context_t kvm, int vcpu);
++
++void *kvm_create_phys_mem(kvm_context_t, unsigned long phys_start, 
++			  unsigned long len, int slot, int log, int writable);
++void kvm_destroy_phys_mem(kvm_context_t, unsigned long phys_start, 
++			  unsigned long len);
++int kvm_get_dirty_pages(kvm_context_t, int slot, void *buf);
++
++/*!
++ * \brief Enable dirty-pages-logging for all memory regions
++ *
++ * \param kvm Pointer to the current kvm_context
++ */
++int kvm_dirty_pages_log_enable_all(kvm_context_t kvm);
++
++/*!
++ * \brief Disable dirty-page-logging for some memory regions
++ *
++ * Disable dirty-pages-logging for those memory regions that were
++ * created with dirty-page-logging disabled.
++ *
++ * \param kvm Pointer to the current kvm_context
++ */
++int kvm_dirty_pages_log_reset(kvm_context_t kvm);
++#endif

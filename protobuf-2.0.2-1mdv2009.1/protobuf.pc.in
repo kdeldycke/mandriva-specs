@@ -1,0 +1,15 @@
+#############################################################################
+##   Copyright (C) 2008 by Rick L. Vinyard, Jr.                            ##
+##   rvinyard@cs.nmsu.edu                                                  ##
+#############################################################################
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
+
+Name: protobuf
+Description: Protocol Buffers are a way of encoding structured data
+Requires: 
+Version: 2.0.2
+Libs: -L${libdir} -lprotobuf
+Cflags: -I${includedir}/google/

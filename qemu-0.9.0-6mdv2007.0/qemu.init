@@ -1,0 +1,136 @@
+#! /bin/sh
+#
+# qemu: Starts the QEMU Accelerator module
+#
+# chkconfig: 35 31 59
+# description: QEMU Accelerator module
+#
+### BEGIN INIT INFO
+# Provides:       kqemu
+# Required-Start: $syslog
+# Required-Stop:
+# Default-Start:  3 5
+# Default-Stop:
+# Description:    QEMU Accelerator module
+# Should-Start:   dkms
+### END INIT INFO
+
+# Source function library.
+. /etc/init.d/functions
+
+MODULE=kqemu
+DAEMON=qemu
+PROGNAME=qemu-bridge
+
+RETVAL=0
+
+kvm_running() {
+    /sbin/lsmod | grep -q kvm
+}
+
+kvm_possible() {
+    # XXX kvm & xen0 don't play together
+    if test -d /sys/bus/xen; then
+	return 1
+    fi
+    case " `grep ^flags /proc/cpuinfo` " in
+	*" svm "*|*" vmx "*) ;;
+	*) return 1;;
+    esac
+    return 0
+}
+
+kvm_start() {
+    if ! kvm_running && kvm_possible; then
+	grep -q GenuineIntel /proc/cpuinfo && /sbin/modprobe kvm-intel
+	grep -q AuthenticAMD /proc/cpuinfo && /sbin/modprobe kvm-amd
+    fi
+}
+
+kvm_stop() {
+    if kvm_running; then
+	grep -q GenuineIntel /proc/cpuinfo && /sbin/rmmod kvm-intel
+	grep -q AuthenticAMD /proc/cpuinfo && /sbin/rmmod kvm-amd
+	/sbin/rmmod kvm
+    fi
+}
+
+running() {
+    /sbin/lsmod | grep -q $MODULE[^_-]
+}
+
+start() {
+    # Check if it is already running
+    if ! running; then
+	gprintf "Starting %s daemon: " "$DAEMON"
+	/sbin/modprobe $MODULE
+	RETVAL=$?
+	if [ $RETVAL -eq 0 ]; then
+	    touch /var/lock/subsys/$PROGNAME
+	    success
+	else
+	    failure
+	fi
+	kvm_start
+    fi
+    echo
+    return $RETVAL
+}
+
+stop() {
+    gprintf "Stopping %s daemon: " "$DAEMON"
+    killall -q $PROGNAME
+    if running; then
+	/sbin/rmmod $MODULE
+	RETVAL=$?
+    fi
+    if [ $RETVAL -eq 0 ]; then
+	rm -f /var/lock/subsys/$PROGNAME
+	success
+    else
+	failure
+    fi
+    kvm_stop
+    echo
+    return $RETVAL
+}
+
+restart() {
+    stop
+    start
+}
+
+status() {
+    if running; then
+	STATUS="loaded"
+    else
+	STATUS="not loaded"
+    fi
+    gprintf "%s kernel module is %s\n" $DAEMON $STATUS
+}
+
+case "$1" in
+    start)
+	start
+	;;
+    stop)
+	stop
+	;;
+    restart)
+	restart
+	;;
+    condrestart)
+	if [ -f /var/lock/subsys/$PROGNAME ]; then
+	    restart
+	fi
+        ;;
+    status)
+	status
+	;;
+    *)
+	INITNAME=`basename $0`
+	gprintf "Usage: %s {start|stop|restart|condrestart|status}\n" "$INITNAME"
+	exit 1
+	;;
+esac
+exit $RETVAL

@@ -1,0 +1,29 @@
+diff -Nurp linux-2.6.31-rc3-git5-mnb1/Makefile linux-2.6.31-rc3-git5-mnb1.p2/Makefile
+--- linux-2.6.31-rc3-git5-mnb1/Makefile	2009-07-23 04:25:52.000000000 +0300
++++ linux-2.6.31-rc3-git5-mnb1.p2/Makefile	2009-07-23 04:28:45.000000000 +0300
+@@ -1192,13 +1192,9 @@ CLEAN_DIRS  += $(MODVERDIR)
+ CLEAN_FILES +=	vmlinux System.map \
+                 .tmp_kallsyms* .tmp_version .tmp_vmlinux* .tmp_System.map
+ 
+-# Directories & files removed with 'make mrproper'
+-MRPROPER_DIRS  += include/config include2 usr/include include/generated
+-MRPROPER_FILES += .config .config.old include/asm .version .old_version \
+-                  include/linux/autoconf.h include/linux/version.h      \
+-                  include/linux/utsrelease.h                            \
+-                  include/linux/bounds.h include/asm*/asm-offsets.h     \
+-		  Module.symvers Module.markers tags TAGS cscope*
++# This is a -devel rpm, so we dont let mrproper remove anything /tmb 12.10.2007
++MRPROPER_DIRS  += ""
++MRPROPER_FILES += ""
+ 
+ # clean - Delete most, but leave enough to build external modules
+ #
+@@ -1224,7 +1220,7 @@ clean: archclean $(clean-dirs)
+ #
+ mrproper: rm-dirs  := $(wildcard $(MRPROPER_DIRS))
+ mrproper: rm-files := $(wildcard $(MRPROPER_FILES))
+-mrproper-dirs      := $(addprefix _mrproper_,Documentation/DocBook scripts)
++mrproper-dirs      := $(addprefix _mrproper_,Documentation/DocBook)
+ 
+ PHONY += $(mrproper-dirs) mrproper archmrproper
+ $(mrproper-dirs):

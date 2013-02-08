@@ -1,0 +1,69 @@
+--- amarok/src/data/Cool-Streams.xml	2006-07-02 21:37:44.000000000 +0200
++++ amarok/src/data/Cool-Streams.xml.patch	2006-07-24 20:54:51.000000000 +0200
+@@ -6,6 +6,9 @@
+  <stream name="Bluemars [Ambient/Space-Music]">
+   <url>http://207.200.96.225:8020/listen.pls</url>
+  </stream>
++ <stream name="Club 977 80's channel">
++  <url>http://www.club977.com/CLUB977HI.pls</url>
++ </stream> 
+  <stream name="Digitally Imported - Chillout [Chill-Out]">
+   <url>http://di.fm/mp3/chillout.pls</url>
+  </stream>
+@@ -30,6 +33,24 @@
+  <stream name="Drone Zone [Ambient]">
+   <url>http://somafm.com/dronezone.pls</url>
+  </stream>
++ <stream name="France Culture">
++  <url>http://ogg.tv-radio.fr:1441/encoderfculture.ogg</url>
++ </stream>
++ <stream name="France Info">
++  <url>http://ogg.tv-radio.fr:1441/encoderfinfo.ogg</url>
++ </stream>
++ <stream name="France Inter">
++  <url>http://ogg.tv-radio.fr:1441/encoderfinter.ogg</url>
++ </stream>
++ <stream name="France Musiques">
++  <url>http://ogg.tv-radio.fr:1441/encoderfmusiques.ogg</url>
++ </stream>
++ <stream name="FIP">
++  <url>http://ogg.tv-radio.fr:1441/encoderfip.ogg</url>
++ </stream>
++ <stream name="Hector">
++  <url>http://ogg.tv-radio.fr:1441/encoderhector.ogg</url>
++ </stream>
+  <stream name="Tags Trance Trip [Trance]">
+   <url>http://somafm.com/tagstrance.pls</url>
+  </stream>
+@@ -39,6 +60,12 @@
+  <stream name="Kohina [Computer-Music]">
+   <url>http://la.campus.ltu.se:8000/stream.ogg.m3u</url>
+  </stream>
++ <stream name="La CityRadio de Paris">
++  <url>http://ogg.tv-radio.fr:1441/encodercityradio.ogg</url>
++ </stream>
++ <stream name="Le Mouv' - L'esprit Rock [Rock (french)]">
++  <url>http://ogg.tv-radio.fr:1441/encoderlemouv.ogg</url>
++ </stream>
+  <stream name="Mostly Classical [Classical]">
+   <url>http://www.mostlyclassical.com/mp3/classical96k.pls</url>
+  </stream>
+@@ -69,6 +96,18 @@
+  <stream name="Secret Agent [Downtempo/Lounge]">
+   <url>http://somafm.com/secretagent.pls</url>
+  </stream>
++ <stream name="SkyFM [TopHits]">
++  <url>http://www.sky.fm/mp3/tophits.pls</url>
++ </stream>
++ <stream name="SkyFM [80s]">
++  <url>http://www.sky.fm/mp3/the80s.pls</url>
++ </stream>
++ <stream name="SkyFM [Classical music]">
++  <url>http://www.sky.fm/mp3/classical.pls</url>
++ </stream>
++ <stream name="SkyFM [NewAge]">
++  <url>http://www.sky.fm/mp3/newage.pls</url>
++ </stream>
+  <stream name="SLAY Radio [C64 Remixes]">
+   <url>http://relay.slayradio.org:8000/listen.pls</url>
+  </stream>

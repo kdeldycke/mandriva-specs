@@ -1,0 +1,21 @@
+--- protobuf-2.0.2/configure.ac.orig	2008-10-03 17:54:31.000000000 +0000
++++ protobuf-2.0.2/configure.ac	2008-10-06 08:31:06.000000000 +0000
+@@ -31,5 +31,5 @@
+ ACX_PTHREAD
+ AC_CXX_STL_HASH
+ 
+-AC_CONFIG_FILES([Makefile src/Makefile ])
++AC_CONFIG_FILES([Makefile src/Makefile protobuf.pc ])
+ AC_OUTPUT
+--- protobuf-2.0.0beta/Makefile.am.orig	2008-07-03 15:41:02.000000000 -0600
++++ protobuf-2.0.0beta/Makefile.am	2008-08-13 10:09:59.000000000 -0600
+@@ -113,5 +113,9 @@
+   Makefile.in            \
+   missing                \
+   mkinstalldirs          \
+   config.h.in            \
+   stamp.h.in
++
++pkgconfigdir = $(libdir)/pkgconfig
++pkgconfig_DATA = protobuf.pc
++

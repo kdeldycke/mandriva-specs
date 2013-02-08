@@ -1,0 +1,1754 @@
+2007-03-13  Gwenole Beauchesne  <gbeauchesne@mandriva.com>
+
+	* Merge Anthony Liguori's QEMU Live Migration (combined) patch +
+	changes from the KVM tree.
+
+--- qemu-0.9.0/audio/wavaudio.c.migration	2006-08-05 23:31:46.000000000 +0200
++++ qemu-0.9.0/audio/wavaudio.c	2007-03-13 18:44:01.000000000 +0100
+@@ -151,7 +151,7 @@ static int wav_init_out (HWVoiceOut *hw,
+     le_store (hdr + 28, hw->info.freq << (bits16 + stereo), 4);
+     le_store (hdr + 32, 1 << (bits16 + stereo), 2);
+ 
+-    wav->f = qemu_fopen (conf.wav_path, "wb");
++    wav->f = qemu_fopen_file (conf.wav_path, "wb");
+     if (!wav->f) {
+         dolog ("Failed to open wave file `%s'\nReason: %s\n",
+                conf.wav_path, strerror (errno));
+--- qemu-0.9.0/audio/wavcapture.c.migration	2006-08-07 23:35:12.000000000 +0200
++++ qemu-0.9.0/audio/wavcapture.c	2007-03-13 18:44:01.000000000 +0100
+@@ -132,7 +132,7 @@ int wav_start_capture (CaptureState *s, 
+     le_store (hdr + 28, freq << shift, 4);
+     le_store (hdr + 32, 1 << shift, 2);
+ 
+-    wav->f = qemu_fopen (path, "wb");
++    wav->f = qemu_fopen_file (path, "wb");
+     if (!wav->f) {
+         term_printf ("Failed to open wave file `%s'\nReason: %s\n",
+                      path, strerror (errno));
+--- qemu-0.9.0/hw/usb-uhci.c.migration	2007-01-18 00:08:17.000000000 +0100
++++ qemu-0.9.0/hw/usb-uhci.c	2007-03-13 18:44:01.000000000 +0100
+@@ -144,6 +144,58 @@ static void uhci_reset(UHCIState *s)
+     }
+ }
+ 
++static void uhci_save(QEMUFile *f, void *opaque)
++{
++    UHCIState *s = opaque;
++    uint8_t num_ports = NB_PORTS;
++    int i;
++    
++    pci_device_save(&s->dev, f);
++
++    qemu_put_8s(f, &num_ports);
++    for (i = 0; i < num_ports; ++i)
++        qemu_put_be16s(f, &s->ports[i].ctrl);
++    qemu_put_be16s(f, &s->cmd);
++    qemu_put_be16s(f, &s->status);
++    qemu_put_be16s(f, &s->intr);
++    qemu_put_be16s(f, &s->frnum);
++    qemu_put_be32s(f, &s->fl_base_addr);
++    qemu_put_8s(f, &s->sof_timing);
++    qemu_put_8s(f, &s->status2);
++    qemu_put_timer(f, s->frame_timer);
++}
++
++static int uhci_load(QEMUFile* f,void* opaque,int version_id)
++{
++    UHCIState *s = opaque;
++    uint8_t num_ports;
++    int i, ret;
++
++    if (version_id > 1)
++        return -EINVAL;
++
++    ret = pci_device_load(&s->dev, f);
++    if (ret < 0)
++        return ret;
++
++    qemu_get_8s(f, &num_ports);
++    if (num_ports != NB_PORTS)
++        return -EINVAL;
++    
++    for (i = 0; i < num_ports; ++i)
++        qemu_get_be16s(f, &s->ports[i].ctrl);
++    qemu_get_be16s(f, &s->cmd);
++    qemu_get_be16s(f, &s->status);
++    qemu_get_be16s(f, &s->intr);
++    qemu_get_be16s(f, &s->frnum);
++    qemu_get_be32s(f, &s->fl_base_addr);
++    qemu_get_8s(f, &s->sof_timing);
++    qemu_get_8s(f, &s->status2);
++    qemu_get_timer(f, s->frame_timer);
++    
++    return 0;
++}
++
+ static void uhci_ioport_writeb(void *opaque, uint32_t addr, uint32_t val)
+ {
+     UHCIState *s = opaque;
+@@ -793,4 +845,6 @@ void usb_uhci_init(PCIBus *bus, int devf
+        to rely on this.  */
+     pci_register_io_region(&s->dev, 4, 0x20, 
+                            PCI_ADDRESS_SPACE_IO, uhci_map);
++
++    register_savevm("uhci", 0, 1, uhci_save, uhci_load, s);
+ }
+--- qemu-0.9.0/Makefile.target.migration	2007-03-13 18:43:42.000000000 +0100
++++ qemu-0.9.0/Makefile.target	2007-03-13 18:44:01.000000000 +0100
+@@ -324,7 +324,7 @@ endif
+ 
+ # must use static linking to avoid leaving stuff in virtual address space
+ VL_OBJS=vl.o osdep.o readline.o monitor.o pci.o console.o loader.o isa_mmio.o
+-VL_OBJS+=cutils.o
++VL_OBJS+=cutils.o migration.o
+ VL_OBJS+=block.o block-raw.o
+ VL_OBJS+=block-cow.o block-qcow.o aes.o block-vmdk.o block-cloop.o block-dmg.o block-bochs.o block-vpc.o block-vvfat.o block-qcow2.o
+ ifdef CONFIG_WIN32
+--- qemu-0.9.0/cpu-all.h.migration	2007-03-13 18:43:42.000000000 +0100
++++ qemu-0.9.0/cpu-all.h	2007-03-13 18:44:01.000000000 +0100
+@@ -892,6 +892,7 @@ int cpu_memory_rw_debug(CPUState *env, t
+ 
+ #define VGA_DIRTY_FLAG  0x01
+ #define CODE_DIRTY_FLAG 0x02
++#define MIGRATION_DIRTY_FLAG 0x08
+ 
+ /* read dirty bit (return 0 or 1) */
+ static inline int cpu_physical_memory_is_dirty(ram_addr_t addr)
+@@ -914,6 +915,10 @@ void cpu_physical_memory_reset_dirty(ram
+                                      int dirty_flags);
+ void cpu_tlb_update_dirty(CPUState *env);
+ 
++int cpu_physical_memory_set_dirty_tracking(int enable);
++
++int cpu_physical_memory_get_dirty_tracking(void);
++
+ void dump_exec_info(FILE *f,
+                     int (*cpu_fprintf)(FILE *f, const char *fmt, ...));
+ 
+--- qemu-0.9.0/cutils.c.migration	2007-01-07 23:04:40.000000000 +0100
++++ qemu-0.9.0/cutils.c	2007-03-13 18:44:01.000000000 +0100
+@@ -81,3 +81,43 @@ int stristart(const char *str, const cha
+         *ptr = p;
+     return 1;
+ }
++
++int hex2bin(char ch)
++{
++    if (ch >= '0' && ch <= '9')
++	return ch - '0';
++    else if (ch >= 'A' && ch <= 'Z')
++	return 10 + ch - 'A';
++    else if (ch >= 'a' && ch <= 'z')
++	return 10 + ch - 'a';
++
++    return -1;
++}
++
++char *urldecode(const char *ptr)
++{
++    char *ret;
++    int i;
++
++    ret = qemu_mallocz(strlen(ptr) + 1);
++    if (ret == NULL)
++	return NULL;
++
++    for (i = 0; *ptr; ptr++, i++) {
++	switch (*ptr) {
++	case '%':
++	    if (ptr[1] == 0 || ptr[2] == 0)
++		break;
++	    ret[i] = hex2bin(ptr[1]) << 4 | hex2bin(ptr[2]);
++	    ptr += 2;
++	    break;
++	default:
++	   ret[i] = *ptr;
++	   break;
++	}
++    }
++    ret[i] = 0;
++
++    return ret;
++}
++
+--- qemu-0.9.0/exec.c.migration	2007-02-13 14:41:12.000000000 +0100
++++ qemu-0.9.0/exec.c	2007-03-13 18:44:27.000000000 +0100
+@@ -83,6 +83,7 @@ int phys_ram_fd;
+ uint8_t *phys_ram_base;
+ uint8_t *phys_ram_dirty;
+ static ram_addr_t phys_ram_alloc_offset = 0;
++static int in_migration;
+ 
+ CPUState *first_cpu;
+ /* current CPU in the current thread. It is only valid inside
+@@ -1409,6 +1410,19 @@ void cpu_physical_memory_reset_dirty(ram
+ #endif
+ }
+ 
++int cpu_physical_memory_set_dirty_tracking(int enable)
++{
++    int r=0;
++
++    in_migration = enable;
++    return r;
++}
++
++int cpu_physical_memory_get_dirty_tracking(void)
++{
++    return in_migration;
++}
++
+ static inline void tlb_update_dirty(CPUTLBEntry *tlb_entry)
+ {
+     ram_addr_t ram_addr;
+@@ -2250,6 +2264,14 @@ uint32_t lduw_phys(target_phys_addr_t ad
+     return tswap16(val);
+ }
+ 
++#ifdef __GNUC__
++#define likely(x) __builtin_expect(!!(x), 1)
++#define unlikely(x) __builtin_expect(!!(x), 0)
++#else
++#define likely(x) x
++#define unlikely(x) x
++#endif
++
+ /* warning: addr must be aligned. The ram page is not masked as dirty
+    and the code inside is not invalidated. It is useful if the dirty
+    bits are used to track modified PTEs */
+@@ -2271,9 +2293,21 @@ void stl_phys_notdirty(target_phys_addr_
+         io_index = (pd >> IO_MEM_SHIFT) & (IO_MEM_NB_ENTRIES - 1);
+         io_mem_write[io_index][2](io_mem_opaque[io_index], addr, val);
+     } else {
+-        ptr = phys_ram_base + (pd & TARGET_PAGE_MASK) + 
+-            (addr & ~TARGET_PAGE_MASK);
++        unsigned long addr1;
++        addr1 = (pd & TARGET_PAGE_MASK) + (addr & ~TARGET_PAGE_MASK);
++
++        ptr = phys_ram_base + addr1;
+         stl_p(ptr, val);
++
++	if (unlikely(in_migration)) {
++	    if (!cpu_physical_memory_is_dirty(addr1)) {
++		/* invalidate code */
++		tb_invalidate_phys_page_range(addr1, addr1 + 4, 0);
++		/* set dirty bit */
++		phys_ram_dirty[addr1 >> TARGET_PAGE_BITS] |=
++		    (0xff & ~CODE_DIRTY_FLAG);
++	    }
++        }
+     }
+ }
+ 
+--- qemu-0.9.0/monitor.c.migration	2007-02-06 10:17:07.000000000 +0100
++++ qemu-0.9.0/monitor.c	2007-03-13 18:44:01.000000000 +0100
+@@ -1252,7 +1252,13 @@ static term_cmd_t term_cmds[] = {
+      { "stopcapture", "i", do_stop_capture,
+        "capture index", "stop capture" },
+     { "memsave", "lis", do_memory_save, 
+-      "addr size file", "save to disk virtual memory dump starting at 'addr' of size 'size'", },
++      "addr size file", "save to disk virtual memory dump starting at 'addr' of size 'size'" },
++    { "migrate", "-ds", do_migrate,
++      "[-d] command", "migrate the VM using command (use -d to not wait for command to complete)" },
++    { "migrate_cancel", "", do_migrate_cancel,
++      "", "cancel the current VM migration" },
++    { "migrate_set_speed", "s", do_migrate_set_speed,
++      "value", "set maximum speed (in bytes) for migrations" },
+     { NULL, NULL, }, 
+ };
+ 
+@@ -1299,6 +1305,8 @@ static term_cmd_t info_cmds[] = {
+       "", "show which guest mouse is receiving events" },
+     { "vnc", "", do_info_vnc,
+       "", "show the vnc server status"},
++    { "migration", "", do_info_migration,
++      "", "show migration information" },
+     { NULL, NULL, },
+ };
+ 
+@@ -2428,12 +2436,26 @@ static void term_read(void *opaque, cons
+         readline_handle_byte(buf[i]);
+ }
+ 
++static int monitor_suspended;
++
++void monitor_suspend(void)
++{
++    monitor_suspended = 1;
++}
++
++void monitor_resume(void)
++{
++    monitor_suspended = 0;
++    monitor_start_input();
++}
++
+ static void monitor_start_input(void);
+ 
+ static void monitor_handle_command1(void *opaque, const char *cmdline)
+ {
+     monitor_handle_command(cmdline);
+-    monitor_start_input();
++    if (!monitor_suspended)
++	monitor_start_input();
+ }
+ 
+ static void monitor_start_input(void)
+--- qemu-0.9.0/vl.c.migration	2007-02-13 14:41:12.000000000 +0100
++++ qemu-0.9.0/vl.c	2007-03-13 18:48:45.000000000 +0100
+@@ -168,6 +168,7 @@ int acpi_enabled = 1;
+ int fd_bootchk = 1;
+ int no_reboot = 0;
+ int daemonize = 0;
++const char *incoming;
+ const char *option_rom[MAX_OPTION_ROMS];
+ int nb_option_roms;
+ int semihosting_enabled = 0;
+@@ -2302,7 +2307,6 @@ static void udp_chr_update_read_handler(
+     }
+ }
+ 
+-int parse_host_port(struct sockaddr_in *saddr, const char *str);
+ #ifndef _WIN32
+ static int parse_unix_path(struct sockaddr_un *uaddr, const char *str);
+ #endif
+@@ -4283,17 +4284,55 @@ void qemu_del_wait_object(HANDLE handle,
+ }
+ #endif
+ 
++#define SELF_ANNOUNCE_ROUNDS 5
++#define ETH_P_EXPERIMENTAL 0x01F1 /* just a number */
++//#define ETH_P_EXPERIMENTAL 0x0012 /* make it the size of the packet */
++#define EXPERIMENTAL_MAGIC 0xf1f23f4f
++
++static int announce_self_create(uint8_t *buf, 
++				uint8_t *mac_addr)
++{
++    uint32_t magic = EXPERIMENTAL_MAGIC;
++    uint16_t proto = htons(ETH_P_EXPERIMENTAL);
++
++    /* FIXME: should we send a different packet (arp/rarp/ping)? */
++
++    memset(buf, 0xff, 6);         /* h_dst */
++    memcpy(buf + 6, mac_addr, 6); /* h_src */
++    memcpy(buf + 12, &proto, 2);  /* h_proto */
++    memcpy(buf + 14, &magic, 4);  /* magic */
++
++    return 18; /* len */
++}
++
++static void qemu_announce_self(void)
++{
++    int i, j, len;
++    VLANState *vlan;
++    VLANClientState *vc;
++    uint8_t buf[256];
++
++    for (i = 0; i < nb_nics; i++) {
++        len = announce_self_create(buf, nd_table[i].macaddr);
++        vlan = nd_table[i].vlan;
++        for(vc = vlan->first_client; vc != NULL; vc = vc->next) {
++	    for (j=0; j < SELF_ANNOUNCE_ROUNDS; j++)
++		vc->fd_read(vc->opaque, buf, len);
++        }
++    }
++}
++
+ /***********************************************************/
+ /* savevm/loadvm support */
+ 
+ #define IO_BUF_SIZE 32768
+ 
+ struct QEMUFile {
+-    FILE *outfile;
+-    BlockDriverState *bs;
+-    int is_file;
+-    int is_writable;
+-    int64_t base_offset;
++    QEMUFilePutBufferFunc *put_buffer;
++    QEMUFileGetBufferFunc *get_buffer;
++    QEMUFileCloseFunc *close;
++    void *opaque;
++
+     int64_t buf_offset; /* start of buffer when writing, end of buffer
+                            when reading */
+     int buf_index;
+@@ -4301,58 +4340,143 @@ struct QEMUFile {
+     uint8_t buf[IO_BUF_SIZE];
+ };
+ 
+-QEMUFile *qemu_fopen(const char *filename, const char *mode)
++typedef struct QEMUFileFD
+ {
+-    QEMUFile *f;
++    int fd;
++} QEMUFileFD;
+ 
+-    f = qemu_mallocz(sizeof(QEMUFile));
+-    if (!f)
+-        return NULL;
+-    if (!strcmp(mode, "wb")) {
+-        f->is_writable = 1;
+-    } else if (!strcmp(mode, "rb")) {
+-        f->is_writable = 0;
+-    } else {
+-        goto fail;
++static int fd_get_buffer(void *opaque, uint8_t *buf, int64_t pos, int size)
++{
++    QEMUFileFD *s = opaque;
++    int offset = 0;
++    ssize_t len;
++
++again:
++    len = read(s->fd, buf + offset, size - offset);
++    if (len == -1) {
++	if (errno == EINTR || errno == EAGAIN)
++	    goto again;
+     }
+-    f->outfile = fopen(filename, mode);
+-    if (!f->outfile)
++
++    return len;
++}
++
++QEMUFile *qemu_fopen_fd(int fd)
++{
++    QEMUFileFD *s = qemu_mallocz(sizeof(QEMUFileFD));
++    s->fd = fd;
++    return qemu_fopen(s, NULL, fd_get_buffer, qemu_free);
++}
++
++typedef struct QEMUFileUnix
++{
++    FILE *outfile;
++} QEMUFileUnix;
++
++static void file_put_buffer(void *opaque, const uint8_t *buf, int64_t pos, int size)
++{
++    QEMUFileUnix *s = opaque;
++    fseek(s->outfile, pos, SEEK_SET);
++    fwrite(buf, 1, size, s->outfile);
++}
++
++static int file_get_buffer(void *opaque, uint8_t *buf, int64_t pos, int size)
++{
++    QEMUFileUnix *s = opaque;
++    fseek(s->outfile, pos, SEEK_SET);
++    return fread(buf, 1, size, s->outfile);
++}
++
++static void file_close(void *opaque)
++{
++    QEMUFileUnix *s = opaque;
++    fclose(s->outfile);
++    qemu_free(s);
++}
++
++QEMUFile *qemu_fopen_file(const char *filename, const char *mode)
++{
++    QEMUFileUnix *s;
++
++    s = qemu_mallocz(sizeof(QEMUFileUnix));
++    if (!s)
++        return NULL;
++
++    s->outfile = fopen(filename, mode);
++    if (!s->outfile)
+         goto fail;
+-    f->is_file = 1;
+-    return f;
+- fail:
+-    if (f->outfile)
+-        fclose(f->outfile);
+-    qemu_free(f);
++
++    if (!strcmp(mode, "wb"))
++	return qemu_fopen(s, file_put_buffer, NULL, file_close);
++    else if (!strcmp(mode, "rb"))
++	return qemu_fopen(s, NULL, file_get_buffer, file_close);
++
++fail:
++    if (s->outfile)
++        fclose(s->outfile);
++    qemu_free(s);
+     return NULL;
+ }
+ 
++typedef struct QEMUFileBdrv
++{
++    BlockDriverState *bs;
++    int64_t base_offset;
++} QEMUFileBdrv;
++
++static void bdrv_put_buffer(void *opaque, const uint8_t *buf, int64_t pos, int size)
++{
++    QEMUFileBdrv *s = opaque;
++    bdrv_pwrite(s->bs, s->base_offset + pos, buf, size);
++}
++
++static int bdrv_get_buffer(void *opaque, uint8_t *buf, int64_t pos, int size)
++{
++    QEMUFileBdrv *s = opaque;
++    return bdrv_pread(s->bs, s->base_offset + pos, buf, size);
++}
++
+ QEMUFile *qemu_fopen_bdrv(BlockDriverState *bs, int64_t offset, int is_writable)
+ {
++    QEMUFileBdrv *s;
++
++    s = qemu_mallocz(sizeof(QEMUFileBdrv));
++    if (!s)
++        return NULL;
++
++    s->bs = bs;
++    s->base_offset = offset;
++
++    if (is_writable)
++	return qemu_fopen(s, bdrv_put_buffer, NULL, qemu_free);
++
++    return qemu_fopen(s, NULL, bdrv_get_buffer, qemu_free);
++}
++
++QEMUFile *qemu_fopen(void *opaque, QEMUFilePutBufferFunc *put_buffer,
++		     QEMUFileGetBufferFunc *get_buffer, QEMUFileCloseFunc *close)
++{
+     QEMUFile *f;
+ 
+     f = qemu_mallocz(sizeof(QEMUFile));
+     if (!f)
+-        return NULL;
+-    f->is_file = 0;
+-    f->bs = bs;
+-    f->is_writable = is_writable;
+-    f->base_offset = offset;
++	return NULL;
++
++    f->opaque = opaque;
++    f->put_buffer = put_buffer;
++    f->get_buffer = get_buffer;
++    f->close = close;
++
+     return f;
+ }
+ 
+ void qemu_fflush(QEMUFile *f)
+ {
+-    if (!f->is_writable)
++    if (!f->put_buffer)
+         return;
++
+     if (f->buf_index > 0) {
+-        if (f->is_file) {
+-            fseek(f->outfile, f->buf_offset, SEEK_SET);
+-            fwrite(f->buf, 1, f->buf_index, f->outfile);
+-        } else {
+-            bdrv_pwrite(f->bs, f->base_offset + f->buf_offset, 
+-                        f->buf, f->buf_index);
+-        }
++	f->put_buffer(f->opaque, f->buf, f->buf_offset, f->buf_index);
+         f->buf_offset += f->buf_index;
+         f->buf_index = 0;
+     }
+@@ -4362,19 +4486,13 @@ static void qemu_fill_buffer(QEMUFile *f
+ {
+     int len;
+ 
+-    if (f->is_writable)
++    if (!f->get_buffer)
+         return;
+-    if (f->is_file) {
+-        fseek(f->outfile, f->buf_offset, SEEK_SET);
+-        len = fread(f->buf, 1, IO_BUF_SIZE, f->outfile);
+-        if (len < 0)
+-            len = 0;
+-    } else {
+-        len = bdrv_pread(f->bs, f->base_offset + f->buf_offset, 
+-                         f->buf, IO_BUF_SIZE);
+-        if (len < 0)
+-            len = 0;
+-    }
++
++    len = f->get_buffer(f->opaque, f->buf, f->buf_offset, IO_BUF_SIZE);
++    if (len < 0)
++	len = 0;
++
+     f->buf_index = 0;
+     f->buf_size = len;
+     f->buf_offset += len;
+@@ -4382,11 +4500,9 @@ static void qemu_fill_buffer(QEMUFile *f
+ 
+ void qemu_fclose(QEMUFile *f)
+ {
+-    if (f->is_writable)
+-        qemu_fflush(f);
+-    if (f->is_file) {
+-        fclose(f->outfile);
+-    }
++    qemu_fflush(f);
++    if (f->close)
++	f->close(f->opaque);
+     qemu_free(f);
+ }
+ 
+@@ -4461,7 +4577,7 @@ int64_t qemu_fseek(QEMUFile *f, int64_t 
+         /* SEEK_END not supported */
+         return -1;
+     }
+-    if (f->is_writable) {
++    if (f->put_buffer) {
+         qemu_fflush(f);
+         f->buf_offset = pos;
+     } else {
+@@ -4661,8 +4777,78 @@ int qemu_loadvm_state(QEMUFile *f)
+         }
+         /* always seek to exact end of record */
+         qemu_fseek(f, cur_pos + record_len, SEEK_SET);
++     }
++    ret = 0;
++ the_end:
++    return ret;
++}
++
++int qemu_live_savevm_state(QEMUFile *f)
++{
++    SaveStateEntry *se;
++    int len, ret;
++
++    qemu_put_be32(f, QEMU_VM_FILE_MAGIC);
++    qemu_put_be32(f, QEMU_VM_FILE_VERSION);
++
++    for(se = first_se; se != NULL; se = se->next) {
++	len = strlen(se->idstr);
++
++	qemu_put_byte(f, len);
++	qemu_put_buffer(f, se->idstr, len);
++	qemu_put_be32(f, se->instance_id);
++	qemu_put_be32(f, se->version_id);
++
++	se->save_state(f, se->opaque);
++    }
++
++    qemu_put_byte(f, 0);
++
++    ret = 0;
++    return ret;
++}
++
++int qemu_live_loadvm_state(QEMUFile *f)
++{
++    SaveStateEntry *se;
++    int len, ret, instance_id, version_id;
++    unsigned int v;
++    char idstr[256];
++    
++    v = qemu_get_be32(f);
++    if (v != QEMU_VM_FILE_MAGIC)
++        goto fail;
++    v = qemu_get_be32(f);
++    if (v != QEMU_VM_FILE_VERSION) {
++    fail:
++        ret = -1;
++        goto the_end;
++    }
++
++    for(;;) {
++        len = qemu_get_byte(f);
++	if (len == 0)
++	    break;
++        qemu_get_buffer(f, idstr, len);
++        idstr[len] = '\0';
++        instance_id = qemu_get_be32(f);
++        version_id = qemu_get_be32(f);
++        se = find_se(idstr, instance_id);
++        if (!se) {
++            fprintf(stderr, "qemu: warning: instance 0x%x of device '%s' not present in current VM\n", 
++                    instance_id, idstr);
++        } else {
++            ret = se->load_state(f, se->opaque, version_id);
++            if (ret < 0) {
++                fprintf(stderr, "qemu: warning: error while loading state for instance 0x%x of device '%s'\n", 
++                        instance_id, idstr);
++            }
++        }
+     }
+     ret = 0;
++
++    qemu_announce_self();
++
+  the_end:
+     return ret;
+ }
+@@ -4982,7 +5168,12 @@ void cpu_save(QEMUFile *f, void *opaque)
+     uint16_t fptag, fpus, fpuc, fpregs_format;
+     uint32_t hflags;
+     int i;
+-    
++
++#ifdef USE_KVM
++    if (kvm_allowed)
++        kvm_save_registers(env);
++#endif    
++
+     for(i = 0; i < CPU_NB_REGS; i++)
+         qemu_put_betls(f, &env->regs[i]);
+     qemu_put_betls(f, &env->eip);
+@@ -5067,6 +5258,16 @@ void cpu_save(QEMUFile *f, void *opaque)
+     qemu_put_be64s(f, &env->kernelgsbase);
+ #endif
+     qemu_put_be32s(f, &env->smbase);
++
++#ifdef USE_KVM
++    if (kvm_allowed) {
++        for (i = 0; i < NR_IRQ_WORDS ; i++) {
++            qemu_put_betls(f, &env->kvm_interrupt_bitmap[i]);
++        }
++        qemu_put_be64s(f, &env->tsc);
++    }
++#endif
++
+ }
+ 
+ #ifdef USE_X86LDOUBLE
+@@ -5486,7 +5687,20 @@ static void ram_decompress_close(RamDeco
+     inflateEnd(&s->zstream);
+ }
+ 
+-static void ram_save(QEMUFile *f, void *opaque)
++static void ram_save_live(QEMUFile *f, void *opaque)
++{
++    target_ulong addr;
++
++    for (addr = 0; addr < phys_ram_size; addr += TARGET_PAGE_SIZE) {
++	if (cpu_physical_memory_get_dirty(addr, MIGRATION_DIRTY_FLAG)) {
++	    qemu_put_be32(f, addr);
++	    qemu_put_buffer(f, phys_ram_base + addr, TARGET_PAGE_SIZE);
++	}
++    }
++    qemu_put_be32(f, 1);
++}
++
++static void ram_save_static(QEMUFile *f, void *opaque)
+ {
+     int i;
+     RamCompressState s1, *s = &s1;
+@@ -5530,16 +5744,39 @@ static void ram_save(QEMUFile *f, void *
+     ram_compress_close(s);
+ }
+ 
+-static int ram_load(QEMUFile *f, void *opaque, int version_id)
++static void ram_save(QEMUFile *f, void *opaque)
++{
++    int in_migration = cpu_physical_memory_get_dirty_tracking();
++
++    qemu_put_byte(f, in_migration);
++
++    if (in_migration)
++	ram_save_live(f, opaque);
++    else
++	ram_save_static(f, opaque);
++}
++
++static int ram_load_live(QEMUFile *f, void *opaque)
++{
++    target_ulong addr;
++
++    do {
++	addr = qemu_get_be32(f);
++	if (addr == 1)
++	    break;
++
++	qemu_get_buffer(f, phys_ram_base + addr, TARGET_PAGE_SIZE);
++    } while (1);
++
++    return 0;
++}
++
++static int ram_load_static(QEMUFile *f, void *opaque)
+ {
+     RamDecompressState s1, *s = &s1;
+     uint8_t buf[10];
+     int i;
+ 
+-    if (version_id == 1)
+-        return ram_load_v1(f, opaque);
+-    if (version_id != 2)
+-        return -EINVAL;
+     if (qemu_get_be32(f) != phys_ram_size)
+         return -EINVAL;
+     if (ram_decompress_open(s, f) < 0)
+@@ -5585,6 +5822,30 @@ static int ram_load(QEMUFile *f, void *o
+     return 0;
+ }
+ 
++static int ram_load(QEMUFile *f, void *opaque, int version_id)
++{
++    int ret;
++
++    switch (version_id) {
++    case 1:
++        ret = ram_load_v1(f, opaque);
++	break;
++    case 3:
++	if (qemu_get_byte(f)) {
++	    ret = ram_load_live(f, opaque);
++	    break;
++	}
++    case 2:
++	ret = ram_load_static(f, opaque);
++	break;
++    default:
++	ret = -EINVAL;
++	break;
++    }
++
++    return ret;
++}
++
+ /***********************************************************/
+ /* bottom halves (can be seen as timers which expire ASAP) */
+ 
+@@ -6207,7 +6468,8 @@ enum {
+     QEMU_OPTION_no_reboot,
+     QEMU_OPTION_daemonize,
+     QEMU_OPTION_option_rom,
+-    QEMU_OPTION_semihosting
++    QEMU_OPTION_semihosting,
++    QEMU_OPTION_incoming,
+ };
+ 
+ typedef struct QEMUOption {
+@@ -6274,6 +6536,7 @@ const QEMUOption qemu_options[] = {
+     { "serial", 1, QEMU_OPTION_serial },
+     { "parallel", 1, QEMU_OPTION_parallel },
+     { "loadvm", HAS_ARG, QEMU_OPTION_loadvm },
++    { "incoming", 1, QEMU_OPTION_incoming },
+     { "full-screen", 0, QEMU_OPTION_full_screen },
+ #ifdef CONFIG_SDL
+     { "no-quit", 0, QEMU_OPTION_no_quit },
+@@ -6498,6 +6761,17 @@ static BOOL WINAPI qemu_ctrl_handler(DWO
+ 
+ #define MAX_NET_CLIENTS 32
+ 
++static int saved_argc;
++static char **saved_argv;
++
++void qemu_get_launch_info(int *argc, char ***argv, int *opt_daemonize, const char **opt_incoming)
++{
++    *argc = saved_argc;
++    *argv = saved_argv;
++    *opt_daemonize = daemonize;
++    *opt_incoming = incoming;
++}
++
+ int main(int argc, char **argv)
+ {
+ #ifdef CONFIG_GDBSTUB
+@@ -6526,6 +6800,9 @@ int main(int argc, char **argv)
+     int usb_devices_index;
+     int fds[2];
+ 
++    saved_argc = argc;
++    saved_argv = argv;
++
+     LIST_INIT (&vm_change_state_head);
+ #ifndef _WIN32
+     {
+@@ -6891,6 +7168,9 @@ int main(int argc, char **argv)
+ 	    case QEMU_OPTION_loadvm:
+ 		loadvm = optarg;
+ 		break;
++	    case QEMU_OPTION_incoming:
++		incoming = optarg;
++		break;
+             case QEMU_OPTION_full_screen:
+                 full_screen = 1;
+                 break;
+@@ -6964,11 +7244,6 @@ int main(int argc, char **argv)
+     }
+ 
+ #ifndef _WIN32
+-    if (daemonize && !nographic && vnc_display == NULL) {
+-	fprintf(stderr, "Can only daemonize if using -nographic or -vnc\n");
+-	daemonize = 0;
+-    }
+-
+     if (daemonize) {
+ 	pid_t pid;
+ 
+@@ -7003,7 +7278,6 @@ int main(int argc, char **argv)
+ 	    exit(1);
+ 
+ 	umask(027);
+-	chdir("/");
+ 
+         signal(SIGTSTP, SIG_IGN);
+         signal(SIGTTOU, SIG_IGN);
+@@ -7138,7 +7412,7 @@ int main(int argc, char **argv)
+     }
+ 
+     register_savevm("timer", 0, 2, timer_save, timer_load, NULL);
+-    register_savevm("ram", 0, 2, ram_save, ram_load, NULL);
++    register_savevm("ram", 0, 3, ram_save, ram_load, NULL);
+ 
+     init_ioports();
+ 
+@@ -7220,8 +7494,19 @@ int main(int argc, char **argv)
+         }
+     } else 
+ #endif
+-    if (loadvm)
+-        do_loadvm(loadvm);
++    if (loadvm) {
++	do_loadvm(loadvm);
++    }
++
++    if (incoming) {
++        int rc;
++
++        rc = migrate_incoming(incoming);
++        if (rc != 0) {
++            fprintf(stderr, "Migration failed rc=%d\n", rc);
++            exit(rc);
++	}
++    }
+ 
+     {
+         /* XXX: simplify init */
+@@ -7244,6 +7529,7 @@ int main(int argc, char **argv)
+ 	if (len != 1)
+ 	    exit(1);
+ 
++	chdir("/");
+ 	fd = open("/dev/null", O_RDWR);
+ 	if (fd == -1)
+ 	    exit(1);
+--- qemu-0.9.0/vl.h.migration	2007-02-13 14:41:12.000000000 +0100
++++ qemu-0.9.0/vl.h	2007-03-13 18:44:01.000000000 +0100
+@@ -105,8 +105,12 @@ void pstrcpy(char *buf, int buf_size, co
+ char *pstrcat(char *buf, int buf_size, const char *s);
+ int strstart(const char *str, const char *val, const char **ptr);
+ int stristart(const char *str, const char *val, const char **ptr);
++int hex2bin(char ch);
++char *urldecode(const char *ptr);
+ 
+ /* vl.c */
++void qemu_get_launch_info(int *argc, char ***argv, int *opt_daemonize, const char **opt_incoming);
++
+ uint64_t muldiv64(uint64_t a, uint32_t b, uint32_t c);
+ 
+ void hw_error(const char *fmt, ...);
+@@ -433,7 +437,14 @@ void cpu_disable_ticks(void);
+ 
+ typedef struct QEMUFile QEMUFile;
+ 
+-QEMUFile *qemu_fopen(const char *filename, const char *mode);
++typedef void (QEMUFilePutBufferFunc)(void *opaque, const uint8_t *buf, int64_t pos, int size);
++typedef int (QEMUFileGetBufferFunc)(void *opaque, uint8_t *buf, int64_t pos, int size);
++typedef void (QEMUFileCloseFunc)(void *opaque);
++
++QEMUFile *qemu_fopen(void *opaque, QEMUFilePutBufferFunc *put_buffer,
++		     QEMUFileGetBufferFunc *get_buffer, QEMUFileCloseFunc *close);
++QEMUFile *qemu_fopen_file(const char *filename, const char *mode);
++QEMUFile *qemu_fopen_fd(int fd);
+ void qemu_fflush(QEMUFile *f);
+ void qemu_fclose(QEMUFile *f);
+ void qemu_put_buffer(QEMUFile *f, const uint8_t *buf, int size);
+@@ -522,6 +533,9 @@ void do_loadvm(const char *name);
+ void do_delvm(const char *name);
+ void do_info_snapshots(void);
+ 
++int qemu_live_savevm_state(QEMUFile *f);
++int qemu_live_loadvm_state(QEMUFile *f);
++
+ /* bottom halves */
+ typedef void QEMUBHFunc(void *opaque);
+ 
+@@ -1372,6 +1386,13 @@ pflash_t *pflash_register (target_ulong 
+ 
+ #endif /* defined(QEMU_TOOL) */
+ 
++/* migration.c */
++void do_info_migration(void);
++void do_migrate(int detach, const char *uri);
++void do_migrate_cancel(void);
++void do_migrate_set_speed(const char *value);
++int migrate_incoming(const char *device);
++
+ /* monitor.c */
+ void monitor_init(CharDriverState *hd, int show_banner);
+ void term_puts(const char *str);
+@@ -1382,6 +1403,8 @@ void term_flush(void);
+ void term_print_help(void);
+ void monitor_readline(const char *prompt, int is_password,
+                       char *buf, int buf_size);
++void monitor_suspend(void);
++void monitor_resume(void);
+ 
+ /* readline.c */
+ typedef void ReadLineFunc(void *opaque, const char *str);
+--- qemu-0.9.0/migration.c.migration	2007-03-13 18:45:00.000000000 +0100
++++ qemu-0.9.0/migration.c	2007-03-13 18:45:36.000000000 +0100
+@@ -0,0 +1,753 @@
++/*
++ * QEMU migration support
++ * 
++ * Copyright (C) 2007 Anthony Liguori <anthony@codemonkey.ws>
++ * 
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++#include "vl.h"
++#include "qemu_socket.h"
++
++#include <sys/wait.h>
++
++#define MIN_FINALIZE_SIZE	(200 << 10)
++
++typedef struct MigrationState
++{
++    int fd;
++    int throttle_count;
++    int bps;
++    int updated_pages;
++    int last_updated_pages;
++    int iteration;
++    int n_buffer;
++    int throttled;
++    int *has_error;
++    char buffer[TARGET_PAGE_SIZE + 4];
++    target_ulong addr;
++    QEMUTimer *timer;
++    void *opaque;
++    int detach;
++    int (*release)(void *opaque);
++} MigrationState;
++
++static uint32_t max_throttle = (32 << 20);
++static MigrationState *current_migration;
++
++//#define MIGRATION_VERIFY
++#ifdef MIGRATION_VERIFY
++static int save_verify_memory(QEMUFile *f, void *opaque);
++static int load_verify_memory(QEMUFile *f, void *opaque, int version_id);
++#endif /* MIGRATION_VERIFY */
++
++/* QEMUFile migration implementation */
++
++static void migrate_put_buffer(void *opaque, const uint8_t *buf, int64_t pos, int size)
++{
++    MigrationState *s = opaque;
++    int offset = 0;
++
++    if (*s->has_error)
++	return;
++
++    while (offset < size) {
++	ssize_t len;
++
++	len = write(s->fd, buf + offset, size - offset);
++	if (len == -1) {
++	    if (errno == EAGAIN || errno == EINTR)
++		continue;
++            term_printf("migration: write failed (%s)\n", strerror(errno));
++	    *s->has_error = 10;
++	    break;
++	} else if (len == 0) {
++            term_printf("migration: other side closed connection\n");
++	    *s->has_error = 11;
++	    break;
++	}
++
++	offset += len;
++    }
++}
++
++static void migrate_close(void *opaque)
++{
++    MigrationState *s = opaque;
++
++    if (s->release && s->release(s->opaque))
++	*s->has_error = 12;
++
++    qemu_free(s);
++    current_migration = NULL;
++}
++
++/* Outgoing migration routines */
++
++static void migrate_finish(MigrationState *s)
++{
++    QEMUFile *f;
++    int ret = 0;
++    int *has_error = s->has_error;
++
++    fcntl(s->fd, F_SETFL, 0);
++
++    if (! *has_error) {
++        f = qemu_fopen(s, migrate_put_buffer, NULL, migrate_close);
++        qemu_aio_flush();
++        vm_stop(0);
++        qemu_put_be32(f, 1);
++        ret = qemu_live_savevm_state(f);
++#ifdef MIGRATION_VERIFY
++        save_verify_memory(f, NULL);
++#endif /* MIGRATION_VERIFY */
++        qemu_fclose(f);
++    }
++    if (ret != 0 || *has_error) {
++	term_printf("Migration failed! ret=%d error=%d\n", ret, *has_error);
++	vm_start();
++    }
++    if (!s->detach)
++	monitor_resume();
++    qemu_free(has_error);
++    cpu_physical_memory_set_dirty_tracking(0);
++}
++
++static int migrate_write_buffer(MigrationState *s)
++{
++    if (*s->has_error)
++	return 0;
++
++    if (s->n_buffer != sizeof(s->buffer)) {
++	ssize_t len;
++    again:
++	len = write(s->fd, s->buffer + s->n_buffer, sizeof(s->buffer) - s->n_buffer);
++	if (len == -1) {
++	    if (errno == EINTR)
++		goto again;
++	    if (errno == EAGAIN)
++		return 1;
++	    *s->has_error = 13;
++	    return 0;
++	}
++	if (len == 0) {
++	    *s->has_error = 14;
++	    return 0;
++	}
++
++	s->throttle_count += len;
++	s->n_buffer += len;
++	if (s->n_buffer != sizeof(s->buffer))
++	    goto again;
++    }
++
++    if (s->throttle_count > max_throttle) {
++	s->throttled = 1;
++	qemu_set_fd_handler2(s->fd, NULL, NULL, NULL, NULL);
++	return 1;
++    }
++
++    return 0;
++}
++
++static int migrate_check_convergence(MigrationState *s)
++{
++    target_ulong addr;
++    int dirty_count = 0;
++
++    for (addr = 0; addr < phys_ram_size; addr += TARGET_PAGE_SIZE) {
++	if (cpu_physical_memory_get_dirty(addr, MIGRATION_DIRTY_FLAG))
++	    dirty_count++;
++    }
++
++    return ((dirty_count * TARGET_PAGE_SIZE) < MIN_FINALIZE_SIZE);
++}
++
++static void migrate_write(void *opaque)
++{
++    MigrationState *s = opaque;
++
++    if (migrate_write_buffer(s))
++	return;
++
++    if (migrate_check_convergence(s) || *s->has_error) {
++	qemu_del_timer(s->timer);
++	qemu_free_timer(s->timer);
++	qemu_set_fd_handler2(s->fd, NULL, NULL, NULL, NULL);
++	migrate_finish(s);
++	return;
++    }	
++
++    while (s->addr < phys_ram_size) {
++	if (cpu_physical_memory_get_dirty(s->addr, MIGRATION_DIRTY_FLAG)) {
++	    uint32_t value = cpu_to_be32(s->addr);
++
++	    memcpy(s->buffer, &value, 4);
++	    memcpy(s->buffer + 4, phys_ram_base + s->addr, TARGET_PAGE_SIZE);
++	    s->n_buffer = 0;
++
++	    cpu_physical_memory_reset_dirty(s->addr, s->addr + TARGET_PAGE_SIZE, MIGRATION_DIRTY_FLAG);
++
++	    s->addr += TARGET_PAGE_SIZE;
++
++	    s->updated_pages++;
++
++	    if (migrate_write_buffer(s))
++		return;
++	} else
++	    s->addr += TARGET_PAGE_SIZE;
++    }
++
++    s->last_updated_pages = s->updated_pages;
++    s->updated_pages = 0;
++    s->addr = 0;
++    s->iteration++;
++}
++
++static void migrate_reset_throttle(void *opaque)
++{
++    MigrationState *s = opaque;
++
++    s->bps = s->throttle_count;
++
++    if (s->throttled) {
++	s->throttled = 0;
++	qemu_set_fd_handler2(s->fd, NULL, NULL, migrate_write, s);
++    }
++    s->throttle_count = 0;
++    qemu_mod_timer(s->timer, qemu_get_clock(rt_clock) + 1000);
++}
++
++static int start_migration(MigrationState *s)
++{
++    uint32_t value = cpu_to_be32(phys_ram_size);
++    target_phys_addr_t addr;
++    size_t offset = 0;
++	
++    while (offset != 4) {
++	ssize_t len = write(s->fd, ((char *)&value) + offset, 4 - offset);
++	if (len == -1 && errno == EINTR)
++	    continue;
++
++	if (len < 1)
++	    return -EIO;
++
++	offset += len;
++    }
++
++    fcntl(s->fd, F_SETFL, O_NONBLOCK);
++
++    for (addr = 0; addr < phys_ram_size; addr += TARGET_PAGE_SIZE) {
++	if (!cpu_physical_memory_get_dirty(addr, MIGRATION_DIRTY_FLAG))
++	    cpu_physical_memory_set_dirty(addr);
++    }
++
++    if (cpu_physical_memory_set_dirty_tracking(1)) {
++        *s->has_error = 16;
++        return -1;
++    }
++
++    s->addr = 0;
++    s->iteration = 0;
++    s->updated_pages = 0;
++    s->last_updated_pages = 0;
++    s->n_buffer = sizeof(s->buffer);
++    s->timer = qemu_new_timer(rt_clock, migrate_reset_throttle, s);
++
++    qemu_mod_timer(s->timer, qemu_get_clock(rt_clock));
++    qemu_set_fd_handler2(s->fd, NULL, NULL, migrate_write, s);
++    return 0;
++}
++
++static MigrationState *migration_init_fd(int detach, int fd)
++{
++    MigrationState *s;
++
++    s = qemu_mallocz(sizeof(MigrationState));
++    if (s == NULL) {
++	term_printf("Allocation error\n");
++	return NULL;
++    }
++
++    s->fd = fd;
++    s->has_error = qemu_mallocz(sizeof(int));
++    if (s->has_error == NULL) {
++        term_printf("malloc failed (for has_error)\n");
++        return NULL;
++    }
++    s->detach = detach;
++
++    current_migration = s;
++    
++    if (start_migration(s) == -1) {
++	term_printf("Could not start migration\n");
++	return NULL;
++    }
++
++    if (!detach)
++	monitor_suspend();
++
++    return s;
++}
++
++typedef struct MigrationCmdState
++{
++    int fd;
++    pid_t pid;
++} MigrationCmdState;
++
++static int cmd_release(void *opaque)
++{
++    MigrationCmdState *c = opaque;
++    int status, ret;
++
++    close(c->fd);
++
++again:
++    ret = waitpid(c->pid, &status, 0);
++    if (ret == -1 && errno == EINTR)
++	goto again;
++
++    if (ret == -1) {
++        term_printf("migration: waitpid failed (%s)\n", strerror(errno));
++        return -1;
++    }
++    /* FIXME: check and uncomment
++     * if (WIFEXITED(status))
++     *     status = WEXITSTATUS(status);
++     */
++    return status;
++}
++
++static MigrationState *migration_init_cmd(int detach, const char *command, char **argv)
++{
++    int fds[2];
++    pid_t pid;
++    int i;
++    MigrationState *s;
++
++    if (pipe(fds) == -1) {
++	term_printf("pipe() (%s)\n", strerror(errno));
++	return NULL;
++    }
++
++    pid = fork();
++    if (pid == -1) {
++	close(fds[0]);
++	close(fds[1]);
++	term_printf("fork error (%s)\n", strerror(errno));
++	return NULL;
++    }
++    if (pid == 0) {
++	close(fds[1]);
++	dup2(fds[0], STDIN_FILENO);
++	execvp(command, argv);
++	exit(1);
++    } else
++	close(fds[0]);
++
++    for (i = 0; argv[i]; i++)
++	qemu_free(argv[i]);
++    qemu_free(argv);
++
++    s = migration_init_fd(detach, fds[1]);
++    if (s) {
++	MigrationCmdState *c = qemu_mallocz(sizeof(*c));
++	c->pid = pid;
++	c->fd = fds[1];
++	s->release = cmd_release;
++	s->opaque = c;
++    }
++
++    return s;
++}
++
++static MigrationState *migration_init_exec(int detach, const char *command)
++{
++    char **argv = NULL;
++
++    argv = qemu_mallocz(sizeof(char *) * 4);
++    argv[0] = strdup("sh");
++    argv[1] = strdup("-c");
++    argv[2] = strdup(command);
++    argv[3] = NULL;
++
++    return migration_init_cmd(detach, "/bin/sh", argv);
++}
++
++static MigrationState *migration_init_ssh(int detach, const char *host)
++{
++    int qemu_argc, daemonize = 0, argc, i;
++    char **qemu_argv, **argv;
++    const char *incoming = NULL;
++	
++    qemu_get_launch_info(&qemu_argc, &qemu_argv, &daemonize, &incoming);
++
++    argc = 3 + qemu_argc;
++    if (!daemonize)
++	argc++;
++    if (!incoming)
++	argc+=2;
++    
++    argv = qemu_mallocz(sizeof(char *) * (argc + 1));
++    argv[0] = strdup("ssh");
++    argv[1] = strdup("-XC");
++    argv[2] = strdup(host);
++
++    for (i = 0; i < qemu_argc; i++)
++	argv[3 + i] = strdup(qemu_argv[i]);
++
++    if (!daemonize)
++	argv[3 + i++] = strdup("-daemonize");
++    if (!incoming) {
++	argv[3 + i++] = strdup("-incoming");
++	argv[3 + i++] = strdup("stdio");
++    }
++
++    argv[3 + i] = NULL;
++
++    return migration_init_cmd(detach, "ssh", argv);
++}
++
++static int tcp_release(void *opaque)
++{
++    MigrationState *s = opaque;
++    uint8_t status = 0;
++    ssize_t len;
++
++again:
++    len = read(s->fd, &status, 1);
++    if (len == -1 && errno == EINTR)
++	goto again;
++
++    close(s->fd);
++
++    return (len != 1 || status != 0);
++}
++
++static MigrationState *migration_init_tcp(int detach, const char *host)
++{
++    int fd;
++    struct sockaddr_in addr;
++    MigrationState *s;
++
++    fd = socket(PF_INET, SOCK_STREAM, 0);
++    if (fd == -1) {
++        term_printf("socket() failed %s\n", strerror(errno));
++	return NULL;
++    }
++
++    addr.sin_family = AF_INET;
++    if (parse_host_port(&addr, host) == -1) {
++        term_printf("parse_host_port() FAILED for %s\n", host);
++	close(fd);
++	return NULL;
++    }
++
++again:
++    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
++        if (errno == EINTR)
++            goto again;
++        term_printf("connect() failed %s\n", strerror(errno));
++	close(fd);
++	return NULL;
++    }
++
++    s = migration_init_fd(detach, fd);
++    if (s) {
++	s->opaque = s;
++	s->release = tcp_release;
++    }
++    return s;
++}
++
++/* Incoming migration */
++
++static int migrate_incoming_fd(int fd)
++{
++    int ret;
++    QEMUFile *f = qemu_fopen_fd(fd);
++    uint32_t addr;
++    extern void qemu_announce_self(void);
++
++    if (qemu_get_be32(f) != phys_ram_size)
++	return 101;
++
++    do {
++	int l;
++	addr = qemu_get_be32(f);
++	if (addr == 1)
++	    break;
++	l = qemu_get_buffer(f, phys_ram_base + addr, TARGET_PAGE_SIZE);
++	if (l != TARGET_PAGE_SIZE)
++	    return 102;
++    } while (1);
++
++
++    qemu_aio_flush();
++    vm_stop(0);
++    ret = qemu_live_loadvm_state(f);
++#ifdef MIGRATION_VERIFY
++    if (ret==0) ret=load_verify_memory(f, NULL, 1);
++#endif /* MIGRATION_VERIFY */
++    qemu_fclose(f);
++
++    return ret;
++}
++
++static int migrate_incoming_tcp(const char *host)
++{
++    struct sockaddr_in addr;
++    socklen_t addrlen = sizeof(addr);
++    int fd, sfd;
++    ssize_t len;
++    uint8_t status = 0;
++    int reuse = 1;
++    int rc;
++
++    addr.sin_family = AF_INET;
++    if (parse_host_port(&addr, host) == -1) {
++        fprintf(stderr, "parse_host_port() failed for %s\n", host);
++        rc = 201;
++	goto error;
++    }
++
++    fd = socket(PF_INET, SOCK_STREAM, 0);
++    if (fd == -1) {
++        perror("socket failed");
++        rc = 202;
++	goto error;
++    }
++
++    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == -1) {
++        perror("setsockopt() failed");
++        rc = 203;
++	goto error_socket;
++    }
++
++    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
++        perror("bind() failed");
++        rc = 204;
++	goto error_socket;
++    }
++
++    if (listen(fd, 1) == -1) {
++        perror("listen() failed");
++        rc = 205;
++	goto error_socket;
++    }
++
++again:
++    sfd = accept(fd, (struct sockaddr *)&addr, &addrlen);
++    if (sfd == -1) {
++	if (errno == EINTR)
++	    goto again;
++        perror("accept() failed");
++        rc = 206;
++	goto error_socket;
++    }
++
++    rc = migrate_incoming_fd(sfd);
++    if (rc != 0) {
++        rc = 207;
++        fprintf(stderr, "migrate_incoming_fd failed (rc=%d)\n", rc);
++	goto error_accept;
++    }
++
++again1:
++    len = write(sfd, &status, 1);
++    if (len == -1 && errno == EAGAIN)
++	goto again1;
++    if (len != 1) {
++        rc = 208;
++	goto error_accept;
++
++    }
++
++error_accept:
++    close(sfd);
++error_socket:
++    close(fd);
++error:
++    return rc;
++}
++
++int migrate_incoming(const char *device)
++{
++    const char *ptr;
++    int ret = 0;
++
++    if (strcmp(device, "stdio") == 0)
++	ret = migrate_incoming_fd(STDIN_FILENO);
++    else if (strstart(device, "tcp://", &ptr)) {
++	char *host, *end;
++	host = strdup(ptr);
++	end = strchr(host, '/');
++	if (end) *end = 0;
++	ret = migrate_incoming_tcp(host);
++	qemu_free(host);
++    } else {
++	errno = EINVAL;
++	ret = -1;
++    }
++
++    return ret;
++}
++
++/* Migration monitor command */
++
++/* TODO:
++   1) audit all error paths
++*/
++
++void do_migrate(int detach, const char *uri)
++{
++    const char *ptr;
++
++    if (strstart(uri, "exec:", &ptr)) {
++	char *command = urldecode(ptr);
++	migration_init_exec(detach, command);
++	free(command);
++    } else if (strstart(uri, "ssh://", &ptr)) {
++	char *host, *end;
++
++	host = strdup(ptr);
++	end = strchr(host, '/');
++	if (end) *end = 0;
++	migration_init_ssh(detach, host);
++	qemu_free(host);
++    } else if (strstart(uri, "tcp://", &ptr)) {
++	char *host, *end;
++
++	host = strdup(ptr);
++	end = strchr(host, '/');
++	if (end) *end = 0;
++
++	if (migration_init_tcp(detach, host) == NULL)
++            term_printf("migration failed (migration_init_tcp for %s failed)\n", host);
++	free(host);
++    } else {
++	term_printf("Unknown migration protocol '%s'\n", uri);
++	return;
++    }
++}
++
++void do_migrate_set_speed(const char *value)
++{
++    double d;
++    char *ptr;
++
++    d = strtod(value, &ptr);
++    switch (*ptr) {
++    case 'G': case 'g':
++	d *= 1024;
++    case 'M': case 'm':
++	d *= 1024;
++    case 'K': case 'k':
++	d *= 1024;
++    default:
++	break;
++    }
++
++    max_throttle = (uint32_t)d;
++}
++
++void do_info_migration(void)
++{
++    MigrationState *s = current_migration;
++
++    if (s) {
++	term_printf("Migration active\n");
++	if (s->bps < (1 << 20))
++	    term_printf("Transfer rate %3.1f kb/s\n",
++			(double)s->bps / 1024);
++	else
++	    term_printf("Transfer rate %3.1f mb/s\n",
++			(double)s->bps / (1024 * 1024));
++	term_printf("Iteration %d\n", s->iteration);
++	term_printf("Transferred %d/%d pages\n", s->updated_pages, phys_ram_size >> TARGET_PAGE_BITS);
++	if (s->iteration)
++	    term_printf("Last iteration found %d dirty pages\n", s->last_updated_pages);
++    } else
++	term_printf("Migration inactive\n");
++
++    term_printf("Maximum migration speed is ");
++    if (max_throttle < (1 << 20))
++	term_printf("%3.1f kb/s\n", (double)max_throttle / 1024);
++    else
++	term_printf("%3.1f mb/s\n", (double)max_throttle / (1024 * 1024));
++}
++
++void do_migrate_cancel(void)
++{
++    MigrationState *s = current_migration;
++
++    if (s)
++	*s->has_error = 20;
++}
++
++
++
++#ifdef MIGRATION_VERIFY
++unsigned int calc_page_checksum(target_ulong addr)
++{
++    unsigned int sum=0;
++    unsigned int *p = (unsigned int *)(phys_ram_base + addr);
++    unsigned int *q = p + (TARGET_PAGE_SIZE / sizeof(unsigned int));
++
++    for ( /*initialized already */ ; p<q ; p++)
++        sum += *p;
++    return sum;
++}
++
++
++static int save_verify_memory(QEMUFile *f, void *opaque)
++{
++    unsigned int addr;
++    unsigned int sum;
++
++    for (addr = 0; addr < phys_ram_size; addr += TARGET_PAGE_SIZE) {
++        sum = calc_page_checksum(addr);
++        qemu_put_be32(f, addr);
++        qemu_put_be32(f, sum);
++    }
++    return 0;
++}
++
++static int load_verify_memory(QEMUFile *f, void *opaque, int version_id)
++{
++    unsigned int addr, raddr;
++    unsigned int sum, rsum;
++    int num_errors = 0;
++    
++    for (addr = 0; addr < phys_ram_size; addr += TARGET_PAGE_SIZE) {
++        sum = calc_page_checksum(addr);
++        raddr = qemu_get_be32(f);
++        rsum  = qemu_get_be32(f);
++        if ((raddr != addr) || (rsum != sum)) {
++            term_printf("checksum mismatch: src:0x%x 0x%x , dst:0x%x 0x%x\n",
++                    raddr, rsum, addr, sum);
++            num_errors++;
++        }
++    }
++    printf("memory_verify: num_errors=%d\n", num_errors);
++    term_printf("memory_verify: num_errors=%d\n", num_errors);
++    return 0/* num_errors */;
++}
++#endif /* MIGRATION_VERIFY */
+diff -urp --exclude .svn --exclude .cvsignore qemu-0.9.0/qemu_socket.h qemu/qemu_socket.h
+--- qemu-0.9.0/qemu_socket.h.migration	2007-02-06 00:01:54.000000000 +0100
++++ qemu-0.9.0/qemu_socket.h	2007-02-28 12:04:08.000000000 +0100
+@@ -28,4 +28,6 @@
+ 
+ void socket_set_nonblock(int fd);
+ 
++int parse_host_port(struct sockaddr_in *saddr, const char *str);
++
+ #endif /* QEMU_SOCKET_H */

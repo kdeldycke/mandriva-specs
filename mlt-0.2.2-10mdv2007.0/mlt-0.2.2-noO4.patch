@@ -1,0 +1,11 @@
+--- mlt-0.2.2/configure.noO4	2006-05-27 21:58:15.000000000 +0200
++++ mlt-0.2.2/configure	2006-09-17 17:57:46.000000000 +0200
+@@ -54,7 +54,7 @@
+ 		[ "$cpu" != "" ] &&
+ 		echo "TARGETARCH=-march=$cpu" &&
+ 		echo "TARGETCPU=-mcpu=$cpu"
+-		echo "OPTIMISATIONS=-O4 -pipe -fomit-frame-pointer"
++		echo "OPTIMISATIONS=-O2 -pipe -fomit-frame-pointer"
+ 
+ 		echo "CFLAGS+=-Wall -fPIC -DPIC \$(TARGETARCH) \$(TARGETCPU) \$(OPTIMISATIONS) \$(MMX_FLAGS) \$(DEBUG_FLAGS) \$(LARGE_FILE)"
+ 

@@ -1,0 +1,54 @@
+2007-03-14  Gwenole Beauchesne  <gbeauchesne@mandriva.com>
+
+	* hw/pc.c (pc_init1): Use the KVM specific BIOS for now.
+
+--- qemu-0.9.0/hw/pc.c.kvm-bios	2007-03-13 21:08:04.000000000 +0100
++++ qemu-0.9.0/hw/pc.c	2007-03-14 12:38:15.000000000 +0100
+@@ -31,6 +31,7 @@ extern int kvm_allowed;
+ //#define DEBUG_BIOS
+ 
+ #define BIOS_FILENAME "bios.bin"
++#define KVM_BIOS_FILENAME "kvm_bios.bin"
+ #define VGABIOS_FILENAME "vgabios.bin"
+ #define VGABIOS_CIRRUS_FILENAME "vgabios-cirrus.bin"
+ #define LINUX_BOOT_FILENAME "linux_boot.bin"
+@@ -466,6 +467,7 @@ static void pc_init1(int ram_size, int v
+     int piix3_devfn = -1;
+     CPUState *env;
+     NICInfo *nd;
++    const char *bios_filename = BIOS_FILENAME;
+ 
+     linux_boot = (kernel_filename != NULL);
+ 
+@@ -493,7 +495,11 @@ static void pc_init1(int ram_size, int v
+     vga_ram_addr = qemu_ram_alloc(vga_ram_size);
+ 
+     /* BIOS load */
+-    snprintf(buf, sizeof(buf), "%s/%s", bios_dir, BIOS_FILENAME);
++#ifdef USE_KVM
++    if (kvm_allowed)
++        bios_filename = KVM_BIOS_FILENAME;
++#endif
++    snprintf(buf, sizeof(buf), "%s/%s", bios_dir, bios_filename);
+     bios_size = get_image_size(buf);
+     if (bios_size <= 0 || 
+         (bios_size % 65536) != 0) {
+--- qemu-0.9.0/Makefile.kvm-bios	2007-03-13 21:08:04.000000000 +0100
++++ qemu-0.9.0/Makefile	2007-03-14 12:37:39.000000000 +0100
+@@ -75,7 +75,7 @@ install: all $(if $(BUILD_DOCS),install-
+ 	mkdir -p "$(DESTDIR)$(bindir)"
+ 	$(INSTALL) -m 755 $(TOOLS) "$(DESTDIR)$(bindir)"
+ 	mkdir -p "$(DESTDIR)$(datadir)"
+-	for x in bios.bin vgabios.bin vgabios-cirrus.bin ppc_rom.bin \
++	for x in bios.bin kvm_bios.bin vgabios.bin vgabios-cirrus.bin ppc_rom.bin \
+ 		video.x openbios-sparc32 linux_boot.bin pxe-ne2k_pci.bin \
+ 		pxe-rtl8139.bin pxe-pcnet.bin; do \
+ 		$(INSTALL) -m 644 $(SRC_PATH)/pc-bios/$$x "$(DESTDIR)$(datadir)"; \
+@@ -155,6 +155,7 @@ tarbin:
+         $(bindir)/qemu-mipsel \
+         $(bindir)/qemu-img \
+ 	$(datadir)/bios.bin \
++	$(datadir)/kvm_bios.bin \
+ 	$(datadir)/vgabios.bin \
+ 	$(datadir)/vgabios-cirrus.bin \
+ 	$(datadir)/ppc_rom.bin \

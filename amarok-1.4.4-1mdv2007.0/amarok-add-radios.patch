@@ -1,0 +1,31 @@
+--- amarok/src/data/Cool-Streams.xml~	2006-09-04 22:42:40.000000000 -0400
++++ amarok/src/data/Cool-Streams.xml	2006-09-14 15:17:37.000000000 -0400
+@@ -6,6 +6,9 @@
+  <stream name="Bluemars [Ambient/Space-Music]">
+   <url>http://207.200.96.225:8020/listen.pls</url>
+  </stream>
++ <stream name="Club 977 80's channel">
++  <url>http://www.club977.com/CLUB977HI.pls</url>
++ </stream>
+  <stream name="Digitally Imported - Chillout [Chill-Out]">
+   <url>http://di.fm/mp3/chillout.pls</url>
+  </stream>
+@@ -69,6 +72,18 @@
+  <stream name="Secret Agent [Downtempo/Lounge]">
+   <url>http://somafm.com/secretagent.pls</url>
+  </stream>
++ <stream name="SkyFM [TopHits]">
++  <url>http://www.sky.fm/mp3/tophits.pls</url>
++ </stream>
++ <stream name="SkyFM [80s]">
++  <url>http://www.sky.fm/mp3/the80s.pls</url>
++ </stream>
++ <stream name="SkyFM [Classical music]">
++  <url>http://www.sky.fm/mp3/classical.pls</url>
++ </stream>
++ <stream name="SkyFM [NewAge]">
++  <url>http://www.sky.fm/mp3/newage.pls</url>
++ </stream>
+  <stream name="SLAY Radio [C64 Remixes]">
+   <url>http://relay.slayradio.org:8000/listen.pls</url>
+  </stream>

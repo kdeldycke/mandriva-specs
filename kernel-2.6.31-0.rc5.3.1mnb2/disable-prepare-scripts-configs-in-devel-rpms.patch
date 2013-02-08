@@ -1,0 +1,76 @@
+diff -Nurp linux-2.6.31-rc3-git5-mnb1.p2/Makefile linux-2.6.31-rc3-git5-mnb1.p3/Makefile
+--- linux-2.6.31-rc3-git5-mnb1.p2/Makefile	2009-07-23 04:28:45.000000000 +0300
++++ linux-2.6.31-rc3-git5-mnb1.p3/Makefile	2009-07-23 04:29:38.000000000 +0300
+@@ -462,8 +462,9 @@ ifeq ($(KBUILD_EXTMOD),)
+ # Carefully list dependencies so we do not try to build scripts twice
+ # in parallel
+ PHONY += scripts
+-scripts: scripts_basic include/config/auto.conf
+-	$(Q)$(MAKE) $(build)=$(@)
++#scripts: scripts_basic include/config/auto.conf
++#	$(Q)$(MAKE) $(build)=$(@)
++scripts:
+ 
+ # Objects we will link into vmlinux / subdirs we need to visit
+ init-y		:= init/
+@@ -978,7 +979,8 @@ prepare0: archprepare FORCE
+ 	$(Q)$(MAKE) $(build)=. missing-syscalls
+ 
+ # All the preparing..
+-prepare: prepare0
++#prepare: prepare0
++prepare:
+ 
+ # Leave this as default for preprocessing vmlinux.lds.S, which is now
+ # done in arch/$(ARCH)/kernel/Makefile
+diff -Nurp linux-2.6.31-rc3-git5-mnb1.p2/scripts/kconfig/Makefile linux-2.6.31-rc3-git5-mnb1.p3/scripts/kconfig/Makefile
+--- linux-2.6.31-rc3-git5-mnb1.p2/scripts/kconfig/Makefile	2009-07-23 04:25:52.000000000 +0300
++++ linux-2.6.31-rc3-git5-mnb1.p3/scripts/kconfig/Makefile	2009-07-23 04:29:38.000000000 +0300
+@@ -10,23 +10,35 @@ else
+ Kconfig := arch/$(SRCARCH)/Kconfig
+ endif
+ 
+-xconfig: $(obj)/qconf 3rdparty/Makefile
+-	$< $(Kconfig)
++#xconfig: $(obj)/qconf 3rdparty/Makefile
++#	$< $(Kconfig)
+ 
+-gconfig: $(obj)/gconf 3rdparty/Makefile
+-	$< $(Kconfig)
++#gconfig: $(obj)/gconf 3rdparty/Makefile
++#	$< $(Kconfig)
+ 
+-menuconfig: $(obj)/mconf 3rdparty/Makefile
+-	$< $(Kconfig)
++#menuconfig: $(obj)/mconf 3rdparty/Makefile
++#	$< $(Kconfig)
+ 
+-config: $(obj)/conf 3rdparty/Makefile
+-	$< $(Kconfig)
++#config: $(obj)/conf 3rdparty/Makefile
++#	$< $(Kconfig)
+ 
+-oldconfig: $(obj)/conf 3rdparty/Makefile
+-	$< -o $(Kconfig)
++#oldconfig: $(obj)/conf 3rdparty/Makefile
++#	$< -o $(Kconfig)
+ 
+-silentoldconfig: $(obj)/conf 3rdparty/Makefile
+-	$< -s $(Kconfig)
++#silentoldconfig: $(obj)/conf 3rdparty/Makefile
++#	$< -s $(Kconfig)
++
++xconfig:
++
++gconfig:
++
++menuconfig:
++
++config:
++
++oldconfig:
++
++silentoldconfig:
+ 
+ # Create new linux.pot file
+ # Adjust charset to UTF-8 in .po file to accept UTF-8 in Kconfig files

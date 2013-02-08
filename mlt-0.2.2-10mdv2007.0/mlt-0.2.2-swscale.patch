@@ -1,0 +1,33 @@
+--- mlt-0.2.2/src/modules/avformat/Makefile.swscale	2007-03-12 11:12:30.000000000 +0100
++++ mlt-0.2.2/src/modules/avformat/Makefile	2007-03-12 11:12:30.000000000 +0100
+@@ -19,6 +19,10 @@
+ 
+ LDFLAGS+=-lavformat$(AVFORMAT_SUFFIX) -lavcodec$(AVFORMAT_SUFFIX) -lavutil$(AVFORMAT_SUFFIX) $(EXTRA_LIBS) -lmlt
+ 
++ifdef SWSCALE
++	CFLAGS+=-DSWSCALE
++endif
++
+ ifdef MMX_FLAGS
+ 	CFLAGS+=-DSWSCALE
+ 	LDFLAGS+=-lswscale$(AVFORMAT_SUFFIX)
+--- mlt-0.2.2/src/modules/avformat/configure.swscale	2007-03-12 11:12:30.000000000 +0100
++++ mlt-0.2.2/src/modules/avformat/configure	2007-03-12 11:12:04.000000000 +0100
+@@ -89,7 +89,7 @@
+ 			echo "LDFLAGS+=-L$static_ffmpeg/libavformat -L$static_ffmpeg/libavcodec -L$static_ffmpeg/libavutil" >> config.mak
+ 			[ $targetos = "Darwin" ] &&
+ 			 	echo "LDFLAGS+=-single_module" >> config.mak
+-			[ "$swscale" != "" ] && echo "SWSCALE=1" >> config.mak
++			[ "$swscale" = "true" ] && echo "SWSCALE=1" >> config.mak
+ 		else
+ 			echo "avformat: Invalid path specified: $static_ffmpeg"
+ 			touch ../disable-avformat
+@@ -100,7 +100,7 @@
+ 		then
+ 			echo "CFLAGS+=-I$shared_ffmpeg/include/ffmpeg " >> config.mak
+ 			echo "LDFLAGS+=-L$shared_ffmpeg/$LIBDIR" >> config.mak
+-			[ "$swscale" != "" ] && echo "SWSCALE=1" >> config.mak
++			[ "$swscale" = "true" ] && echo "SWSCALE=1" >> config.mak
+ 		else
+ 			echo "avformat: No build environment found. "
+ 			echo "          Try configuring mlt with --avformat-svn."

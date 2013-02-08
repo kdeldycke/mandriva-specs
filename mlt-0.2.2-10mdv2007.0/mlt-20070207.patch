@@ -1,0 +1,2892 @@
+diff -w -uNr --exclude=CVS mlt-0.2.2/ChangeLog mlt/ChangeLog
+--- mlt-0.2.2/ChangeLog	2003-12-19 14:57:39.000000000 +0100
++++ mlt/ChangeLog	2007-03-04 06:32:11.000000000 +0100
+@@ -0,0 +1,27 @@
++2007-02-07 Dan Dennedy <dan@dennedy.org>
++	Added ffmpeg libswscale support to avformat module (requires configure
++	option --avformat-swscale)
++
++2006-12-07 Dan Dennedy <dan@dennedy.org
++	Applied patch from Stephane Fillod to make configure run with bash
++	since it uses bash-specific features. Also, patches headers to 
++	C comments for pedantic compilation.
++
++2006-09-28 Zachary Drew <zachary.drew@gmail.com>
++	applied audio frequency and audio channels initialization patch from Jean-Baptiste
++
++2006-09-27 Zachary Drew <zachary.drew@gmail.com>
++	applied amd64 patch from gentoo folks to fix compilation of motion_est
++	on amd64 (thanks for the heads-up Jean-Michel)
++
++
++2006-09-25 Dan Dennedy <dan@dennedy.org>
++	- src/modules/sdl/Makefile: fix compilation on some systems using
++	  modular x.org.
++
++2006-08-08 Dan Dennedy <dan@dennedy.org>
++	enhance producer_westley to parse Kino 0.9.1 SMIL (clock) time values. 
++
++2006-08-08 Dan Dennedy <dan@dennedy.org>
++	convert --avformat-cvs to svn and rename option as --avformat-svn (--avformat-cvs is an undocumented alias). 
++
+diff -w -uNr --exclude=CVS mlt-0.2.2/configure mlt/configure
+--- mlt-0.2.2/configure	2007-03-11 12:41:03.000000000 +0100
++++ mlt/configure	2007-03-04 06:30:14.000000000 +0100
+@@ -1,6 +1,6 @@
+-#!/bin/sh
++#!/bin/bash
+ 
+-function show_help
++show_help()
+ {
+ 	cat << EOF
+ Non-autotool config script for MLT.
+@@ -34,7 +34,7 @@
+ 	echo
+ }
+ 
+-function build_config
++build_config()
+ {
+ 	(
+ 		echo "version=$version"
+@@ -97,7 +90,7 @@
+ 	echo -n > packages.dat
+ }
+ 
+-function build_pkgconfig
++build_pkgconfig()
+ {
+ 	for i in framework valerie miracle
+ 	do
+diff -w -uNr --exclude=CVS mlt-0.2.2/demo/README mlt/demo/README
+--- mlt-0.2.2/demo/README	2004-03-26 08:10:29.000000000 +0100
++++ mlt/demo/README	2007-03-04 06:31:40.000000000 +0100
+@@ -15,7 +15,7 @@
+ representation of the service network. That can be played directly due to the
+ westley producer plugin. See docs/westley.txt for more information. The
+ "MainConcept DV" consumer refers to the proprietary MLT plugin required to
+-use MLT with MainConcept DV, DVCPro, and MPEG codecs. "/dev/dv1394" refers
++use MLT with MainConcept DV, DVCPro, and MPEG codecs. "/dev/dv1394/0" refers
+ to a device file for transmitting DV over FireWire using the Linux dv1394 kernel
+ module. The "BlueFish444" consumer is another proprietary plugin to use
+ the BlueFish444 manufactured SDI video/audio output cards with MLT.
+diff -w -uNr --exclude=CVS mlt-0.2.2/demo/consumers.ini mlt/demo/consumers.ini
+--- mlt-0.2.2/demo/consumers.ini	2004-12-27 22:27:28.000000000 +0100
++++ mlt/demo/consumers.ini	2007-03-04 06:31:40.000000000 +0100
+@@ -4,8 +4,8 @@
+ SDL Progressive					sdl progressive=1
+ Westley to Terminal				westley
+ Westley to File					westley:
+-MainConcept DV to /dev/dv1394	mcdv:/dev/dv1394 rescale=nearest buffer=25
+-libdv to /dev/dv1394			libdv:/dev/dv1394 rescale=nearest buffer=25
++MainConcept DV to /dev/dv1394/0	mcdv:/dev/dv1394/0 rescale=nearest buffer=25
++libdv to /dev/dv1394/0			libdv:/dev/dv1394/0 rescale=nearest buffer=25
+ BlueFish444 PAL					bluefish:1
+ BlueFish444 NTSC				bluefish:1 standard=NTSC
+ BlueFish444 PAL Prog LL			bluefish:1 progressive=1 buffer=1 frames=4
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/framework/mlt_consumer.h mlt/src/framework/mlt_consumer.h
+--- mlt-0.2.2/src/framework/mlt_consumer.h	2005-06-21 22:59:37.000000000 +0200
++++ mlt/src/framework/mlt_consumer.h	2006-12-08 05:58:52.000000000 +0100
+@@ -29,16 +29,16 @@
+ 
+ struct mlt_consumer_s
+ {
+-	// We're implementing service here
++	/* We're implementing service here */
+ 	struct mlt_service_s parent;
+ 
+-	// public virtual
++	/* public virtual */
+ 	int ( *start )( mlt_consumer );
+ 	int ( *stop )( mlt_consumer );
+ 	int ( *is_stopped )( mlt_consumer );
+ 	void ( *close )( mlt_consumer );
+ 
+-	// Private data
++	/* Private data */
+ 	void *local;
+ 	void *child;
+ 
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/framework/mlt_filter.h mlt/src/framework/mlt_filter.h
+--- mlt-0.2.2/src/framework/mlt_filter.h	2004-12-01 14:37:06.000000000 +0100
++++ mlt/src/framework/mlt_filter.h	2006-12-08 05:58:52.000000000 +0100
+@@ -28,16 +28,16 @@
+ 
+ struct mlt_filter_s
+ {
+-	// We're implementing service here
++	/* We're implementing service here */
+ 	struct mlt_service_s parent;
+ 
+-	// public virtual
++	/* public virtual */
+ 	void ( *close )( mlt_filter );
+ 
+-	// protected filter method
++	/* protected filter method */
+ 	mlt_frame ( *process )( mlt_filter, mlt_frame );
+ 
+-	// Protected
++	/* Protected */
+ 	void *child;
+ };
+ 
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/framework/mlt_frame.c mlt/src/framework/mlt_frame.c
+--- mlt-0.2.2/src/framework/mlt_frame.c	2006-05-22 02:59:48.000000000 +0200
++++ mlt/src/framework/mlt_frame.c	2007-01-19 09:07:40.000000000 +0100
+@@ -532,31 +532,24 @@
+ int mlt_convert_yuv422_to_rgb24a( uint8_t *yuv, uint8_t *rgba, unsigned int total )
+ {
+ 	int ret = 0;
+-	int yy, uu, vv, ug_plus_vg, ub, vr;
++	int yy, uu, vv;
+       	int r,g,b;
+ 	total /= 2;
+ 	while (total--) 
+ 	{
+-		yy = yuv[0] << 8;
+-		uu = yuv[1] - 128;
+-		vv = yuv[3] - 128;
+-		ug_plus_vg = uu * 88 + vv * 183;
+-		ub = uu * 454;
+-		vr = vv * 359;
+-		r = (yy + vr) >> 8;
+-		g = (yy - ug_plus_vg) >> 8;
+-		b = (yy + ub) >> 8;
+-		rgba[0] = r < 0 ? 0 : (r > 255 ? 255 : (unsigned char)r);
+-		rgba[1] = g < 0 ? 0 : (g > 255 ? 255 : (unsigned char)g);
+-		rgba[2] = b < 0 ? 0 : (b > 255 ? 255 : (unsigned char)b);
++		yy = yuv[0];
++		uu = yuv[1];
++		vv = yuv[3];
++		YUV2RGB(yy, uu, vv, r, g, b);
++		rgba[0] = r;
++		rgba[1] = g;
++		rgba[2] = b;
+ 		rgba[3] = 255;
+-		yy = yuv[2] << 8;
+-		r = (yy + vr) >> 8;
+-		g = (yy - ug_plus_vg) >> 8;
+-		b = (yy + ub) >> 8;
+-		rgba[4] = r < 0 ? 0 : (r > 255 ? 255 : (unsigned char)r);
+-		rgba[5] = g < 0 ? 0 : (g > 255 ? 255 : (unsigned char)g);
+-		rgba[6] = b < 0 ? 0 : (b > 255 ? 255 : (unsigned char)b);
++		yy = yuv[2];
++		YUV2RGB(yy, uu, vv, r, g, b);
++		rgba[4] = r;
++		rgba[5] = g;
++		rgba[6] = b;
+ 		rgba[7] = 255;
+ 		yuv += 4;
+ 		rgba += 8;
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/framework/mlt_frame.h mlt/src/framework/mlt_frame.h
+--- mlt-0.2.2/src/framework/mlt_frame.h	2006-05-22 02:59:48.000000000 +0200
++++ mlt/src/framework/mlt_frame.h	2006-12-08 05:58:52.000000000 +0100
+@@ -29,13 +29,13 @@
+ 
+ struct mlt_frame_s
+ {
+-	// We're extending properties here
++	/* We're extending properties here */
+ 	struct mlt_properties_s parent;
+ 
+-	// Virtual methods
++	/* Virtual methods */
+ 	uint8_t * ( *get_alpha_mask )( mlt_frame self );
+ 	
+-	// Private properties
++	/* Private properties */
+ 	mlt_deque stack_image;
+ 	mlt_deque stack_audio;
+ 	mlt_deque stack_service;
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/framework/mlt_geometry.h mlt/src/framework/mlt_geometry.h
+--- mlt-0.2.2/src/framework/mlt_geometry.h	2005-01-03 21:13:30.000000000 +0100
++++ mlt/src/framework/mlt_geometry.h	2006-12-08 05:58:52.000000000 +0100
+@@ -25,15 +25,15 @@
+ 
+ struct mlt_geometry_item_s
+ {
+-	// Will be 1 when this is a key frame 
++	/* Will be 1 when this is a key frame */
+ 	int key;
+-	// The actual frame this corresponds to 
++	/* The actual frame this corresponds to */
+ 	int frame;
+-	// Distort
++	/* Distort */
+ 	int distort;
+-	// x,y are upper left
++	/* x,y are upper left */
+ 	float x, y, w, h, mix;
+-	// Indicates which values are fixed
++	/* Indicates which values are fixed */
+ 	int f[ 5 ];
+ };
+ 
+@@ -42,31 +42,31 @@
+ 	void *local;
+ };
+ 
+-// Create a new geometry structure
++/* Create a new geometry structure */
+ extern mlt_geometry mlt_geometry_init( );
+-// Parse the geometry specification for a given length and normalised width/height (-1 for default)
++/* Parse the geometry specification for a given length and normalised width/height (-1 for default) */
+ extern int mlt_geometry_parse( mlt_geometry self, char *data, int length, int nw, int nh );
+-// Conditionally refresh the geometry if it's modified
++/* Conditionally refresh the geometry if it's modified */
+ extern int mlt_geometry_refresh( mlt_geometry self, char *data, int length, int nw, int nh );
+-// Get and set the length
++/* Get and set the length */
+ extern int mlt_geometry_get_length( mlt_geometry self );
+ extern void mlt_geometry_set_length( mlt_geometry self, int length );
+-// Parse an item - doesn't affect the geometry itself but uses current information for evaluation 
+-// (item->frame should be specified if not included in the data itself)
++/* Parse an item - doesn't affect the geometry itself but uses current information for evaluation */
++/* (item->frame should be specified if not included in the data itself) */
+ extern int mlt_geometry_parse_item( mlt_geometry self, mlt_geometry_item item, char *data );
+-// Fetch a geometry item for an absolute position
++/* Fetch a geometry item for an absolute position */
+ extern int mlt_geometry_fetch( mlt_geometry self, mlt_geometry_item item, float position );
+-// Specify a geometry item at an absolute position
++/* Specify a geometry item at an absolute position */
+ extern int mlt_geometry_insert( mlt_geometry self, mlt_geometry_item item );
+-// Remove the key at the specified position
++/* Remove the key at the specified position */
+ extern int mlt_geometry_remove( mlt_geometry self, int position );
+-// Get the key at the position or the next following
++/* Get the key at the position or the next following */
+ extern int mlt_geometry_next_key( mlt_geometry self, mlt_geometry_item item, int position );
+ extern int mlt_geometry_prev_key( mlt_geometry self, mlt_geometry_item item, int position );
+-// Serialise the current geometry
++/* Serialise the current geometry */
+ extern char *mlt_geometry_serialise_cut( mlt_geometry self, int in, int out );
+ extern char *mlt_geometry_serialise( mlt_geometry self );
+-// Close the geometry
++/* Close the geometry */
+ extern void mlt_geometry_close( mlt_geometry self );
+ 
+ #endif
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/framework/mlt_multitrack.h mlt/src/framework/mlt_multitrack.h
+--- mlt-0.2.2/src/framework/mlt_multitrack.h	2004-12-01 14:37:06.000000000 +0100
++++ mlt/src/framework/mlt_multitrack.h	2006-12-08 05:58:52.000000000 +0100
+@@ -36,7 +36,7 @@
+ 
+ struct mlt_multitrack_s
+ {
+-	// We're extending producer here
++	/* We're extending producer here */
+ 	struct mlt_producer_s parent;
+ 	mlt_track *list;
+ 	int size;
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/framework/mlt_producer.h mlt/src/framework/mlt_producer.h
+--- mlt-0.2.2/src/framework/mlt_producer.h	2004-12-01 14:37:06.000000000 +0100
++++ mlt/src/framework/mlt_producer.h	2006-12-08 05:58:52.000000000 +0100
+@@ -29,15 +29,15 @@
+ 
+ struct mlt_producer_s
+ {
+-	// We're implementing service here
++	/* We're implementing service here */
+ 	struct mlt_service_s parent;
+ 
+-	// Public virtual methods
++	/* Public virtual methods */
+ 	int ( *get_frame )( mlt_producer, mlt_frame_ptr, int );
+ 	mlt_destructor close;
+ 	void *close_object;
+ 
+-	// Private data
++	/* Private data */
+ 	void *local;
+ 	void *child;
+ };
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/framework/mlt_service.h mlt/src/framework/mlt_service.h
+--- mlt-0.2.2/src/framework/mlt_service.h	2004-12-01 14:37:06.000000000 +0100
++++ mlt/src/framework/mlt_service.h	2006-12-08 05:58:52.000000000 +0100
+@@ -28,15 +28,15 @@
+ 
+ struct mlt_service_s
+ {
+-	// We're extending properties here
++	/* We're extending properties here */
+ 	struct mlt_properties_s parent;
+ 
+-	// Protected virtual
++	/* Protected virtual */
+ 	int ( *get_frame )( mlt_service self, mlt_frame_ptr frame, int index );
+ 	mlt_destructor close;
+ 	void *close_object;
+ 
+-	// Private data
++	/* Private data */
+ 	void *local;
+ 	void *child;
+ };
+@@ -62,7 +62,7 @@
+ 
+ extern void mlt_service_close( mlt_service self );
+ 
+-// I'm not sure about self one - leaving it out of docs for now (only used in consumer_westley)
++/* I'm not sure about self one - leaving it out of docs for now (only used in consumer_westley) */
+ extern mlt_service mlt_service_get_producer( mlt_service self );
+ 
+ #endif
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/framework/mlt_transition.h mlt/src/framework/mlt_transition.h
+--- mlt-0.2.2/src/framework/mlt_transition.h	2005-01-25 13:31:08.000000000 +0100
++++ mlt/src/framework/mlt_transition.h	2006-12-08 05:58:52.000000000 +0100
+@@ -28,22 +28,22 @@
+ 
+ struct mlt_transition_s
+ {
+-	// We're implementing service here
++	/* We're implementing service here */
+ 	struct mlt_service_s parent;
+ 
+-	// public virtual
++	/* public virtual */
+ 	void ( *close )( mlt_transition );
+ 
+-	// protected transition method
++	/* protected transition method */
+ 	mlt_frame ( *process )( mlt_transition, mlt_frame, mlt_frame );
+ 
+-	// Protected
++	/* Protected */
+ 	void *child;
+ 	
+-	// track and in/out points
++	/* track and in/out points */
+ 	mlt_service producer;
+ 	
+-	// Private
++	/* Private */
+ 	mlt_frame *frames;
+ 	int held;
+ };
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/avformat/Makefile mlt/src/modules/avformat/Makefile
+--- mlt-0.2.2/src/modules/avformat/Makefile	2005-12-05 12:35:53.000000000 +0100
++++ mlt/src/modules/avformat/Makefile	2007-03-04 06:32:11.000000000 +0100
+@@ -19,6 +19,11 @@
+ 
+ LDFLAGS+=-lavformat$(AVFORMAT_SUFFIX) -lavcodec$(AVFORMAT_SUFFIX) -lavutil$(AVFORMAT_SUFFIX) $(EXTRA_LIBS) -lmlt
+ 
++ifdef MMX_FLAGS
++	CFLAGS+=-DSWSCALE
++	LDFLAGS+=-lswscale$(AVFORMAT_SUFFIX)
++endif
++
+ SRCS := $(OBJS:.o=.c)
+ 
+ all: 	$(TARGET)
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/avformat/configure mlt/src/modules/avformat/configure
+--- mlt-0.2.2/src/modules/avformat/configure	2005-12-05 21:08:01.000000000 +0100
++++ mlt/src/modules/avformat/configure	2007-03-04 06:32:11.000000000 +0100
+@@ -6,11 +6,12 @@
+ 	cat << EOF
+ FFMPEG/avformat options:
+ 
+-  --avformat-cvs          - Obtain ffmpeg from CVS
++  --avformat-svn          - Obtain ffmpeg from Subversion
+   --avformat-shared=path  - Link against a shared installation of ffmpeg (default)
+   --avformat-static=path  - Link against a static ffmpeg dev tree
+   --avformat-ldextra=libs - Provide additional libs to link with
+   --avformat-suffix=suff  - Specify a custom suffix for an ffmpeg shared build
++  --avformat-swscale      - Use ffmpeg libswcale instead of img_convert
+ 
+ EOF
+ 
+@@ -42,8 +43,9 @@
+ 	export static_ffmpeg=
+ 	export shared_ffmpeg=`which ffmpeg`
+ 	export extra_libs=
+-	export cvs_ffmpeg=
++	export svn_ffmpeg=
+ 	export avformat_suffix=
++	export swscale=false
+ 
+ 	if [ "$shared_ffmpeg" != "" -a -f "$shared_ffmpeg" ]
+ 	then
+@@ -59,19 +61,20 @@
+ 			--avformat-static=* )	static_ffmpeg="${i#--avformat-static=}" ;;
+ 			--avformat-shared=* )	shared_ffmpeg="${i#--avformat-shared=}" ;;
+ 			--avformat-ldextra=* )	extra_libs="${i#--avformat-ldextra=}" ;;
+-			--avformat-cvs )		cvs_ffmpeg=true ;;
++			--avformat-svn )		svn_ffmpeg=true ;;
++			--avformat-cvs )		svn_ffmpeg=true ;;
+ 			--avformat-suffix=* )	avformat_suffix="${i#--avformat-suffix=}" ;;
++			--avformat-swscale )	swscale=true ;;
+ 		esac
+ 	done
+ 
+-	if [ "$cvs_ffmpeg" != "" ]
++	if [ "$svn_ffmpeg" != "" ]
+ 	then
+ 		[ ! -d "ffmpeg" ] && ( 
+ 			echo
+ 			echo "Checking out ffmpeg/avformat - no password required"
+ 			echo
+-			cvs -z9 -d:pserver:anonymous@mplayerhq.hu:/cvsroot/ffmpeg login
+-			cvs -z9 -d:pserver:anonymous@mplayerhq.hu:/cvsroot/ffmpeg co ffmpeg
++			svn checkout svn://svn.mplayerhq.hu/ffmpeg/trunk ffmpeg
+ 		)
+ 		[ -d "ffmpeg" ] && ( cd ffmpeg ; ./configure --enable-shared --build-suffix="$avformat_suffix" )
+ 		#[ ! -f "ffmpeg/ffmpeg.patch" ] && ( cd ffmpeg ; cp ../ffmpeg.patch . ; patch -p0 < ffmpeg.patch )
+@@ -86,6 +89,7 @@
+ 			echo "LDFLAGS+=-L$static_ffmpeg/libavformat -L$static_ffmpeg/libavcodec -L$static_ffmpeg/libavutil" >> config.mak
+ 			[ $targetos = "Darwin" ] &&
+ 			 	echo "LDFLAGS+=-single_module" >> config.mak
++			[ "$swscale" != "" ] && echo "SWSCALE=1" >> config.mak
+ 		else
+ 			echo "avformat: Invalid path specified: $static_ffmpeg"
+ 			touch ../disable-avformat
+@@ -96,9 +100,10 @@
+ 		then
+ 			echo "CFLAGS+=-I$shared_ffmpeg/include/ffmpeg " >> config.mak
+ 			echo "LDFLAGS+=-L$shared_ffmpeg/$LIBDIR" >> config.mak
++			[ "$swscale" != "" ] && echo "SWSCALE=1" >> config.mak
+ 		else
+ 			echo "avformat: No build environment found. "
+-			echo "          Try configuring mlt with --avformat-cvs."
++			echo "          Try configuring mlt with --avformat-svn."
+ 			touch ../disable-avformat
+ 			exit 0
+ 		fi
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/avformat/consumer_avformat.c mlt/src/modules/avformat/consumer_avformat.c
+--- mlt-0.2.2/src/modules/avformat/consumer_avformat.c	2007-03-11 12:41:03.000000000 +0100
++++ mlt/src/modules/avformat/consumer_avformat.c	2007-03-04 06:32:11.000000000 +0100
+@@ -35,6 +35,9 @@
+ 
+ // avformat header files
+ #include <avformat.h>
++#ifdef SWSCALE
++#include <swscale.h>
++#endif
+ 
+ //
+ // This structure should be extended and made globally available in mlt
+@@ -161,7 +164,7 @@
+ 		mlt_properties_set_int( properties, "gop_size", 12 );
+ 		mlt_properties_set_int( properties, "b_frames", 0 );
+ 		mlt_properties_set_int( properties, "mb_decision", FF_MB_DECISION_SIMPLE );
+-		mlt_properties_set_double( properties, "qscale", 0 );
++		mlt_properties_set_double( properties, "qscale", 1 );
+ 		mlt_properties_set_int( properties, "me_method", ME_EPZS );
+ 		mlt_properties_set_int( properties, "mb_cmp", FF_CMP_SAD );
+ 		mlt_properties_set_int( properties, "ildct_cmp", FF_CMP_VSAD );
+@@ -736,6 +739,32 @@
+ 	}
+ 
+ 	// Update the output context
++
++	// Write metadata
++	char *tmp = NULL;
++	int metavalue;
++
++	tmp = mlt_properties_get( properties, "meta.attr.title.markup");
++	if (tmp != NULL) snprintf( oc->title, sizeof(oc->title), "%s", tmp );
++
++	tmp = mlt_properties_get( properties, "meta.attr.comment.markup");
++	if (tmp != NULL) snprintf( oc->comment, sizeof(oc->comment), "%s", tmp );
++
++	tmp = mlt_properties_get( properties, "meta.attr.author.markup");
++	if (tmp != NULL) snprintf( oc->author, sizeof(oc->author), "%s", tmp );
++
++	tmp = mlt_properties_get( properties, "meta.attr.copyright.markup");
++	if (tmp != NULL) snprintf( oc->copyright, sizeof(oc->copyright), "%s", tmp );
++
++	tmp = mlt_properties_get( properties, "meta.attr.album.markup");
++	if (tmp != NULL) snprintf( oc->album, sizeof(oc->album), "%s", tmp );
++
++	metavalue = mlt_properties_get_int( properties, "meta.attr.year.markup");
++	if (metavalue != 0) oc->year = metavalue;
++
++	metavalue = mlt_properties_get_int( properties, "meta.attr.track.markup");
++	if (metavalue != 0) oc->track = metavalue;
++
+ 	oc->oformat = fmt;
+ 	snprintf( oc->filename, sizeof(oc->filename), "%s", filename );
+ 
+@@ -913,7 +942,15 @@
+ 						}
+ 
+ 						// Do the colour space conversion
++#ifdef SWSCALE
++						struct SwsContext *context = sws_getContext( width, height, PIX_FMT_YUV422,
++							width, height, video_st->codec->pix_fmt, SWS_FAST_BILINEAR, NULL, NULL, NULL);
++						sws_scale( context, input->data, input->linesize, 0, height,
++							output->data, output->linesize);
++						sws_freeContext( context );
++#else
+ 						img_convert( ( AVPicture * )output, video_st->codec->pix_fmt, ( AVPicture * )input, PIX_FMT_YUV422, width, height );
++#endif
+ 
+ 						// Apply the alpha if applicable
+ 						if ( video_st->codec->pix_fmt == PIX_FMT_RGBA32 )
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/avformat/filter_avcolour_space.c mlt/src/modules/avformat/filter_avcolour_space.c
+--- mlt-0.2.2/src/modules/avformat/filter_avcolour_space.c	2006-05-04 22:06:48.000000000 +0200
++++ mlt/src/modules/avformat/filter_avcolour_space.c	2007-03-04 06:32:11.000000000 +0100
+@@ -24,6 +24,9 @@
+ 
+ // ffmpeg Header files
+ #include <avformat.h>
++#ifdef SWSCALE
++#include <swscale.h>
++#endif
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -67,9 +70,17 @@
+ {
+ 	AVPicture input;
+ 	AVPicture output;
+-	avpicture_fill( &output, out, out_fmt, width, height );
+ 	avpicture_fill( &input, in, in_fmt, width, height );
++	avpicture_fill( &output, out, out_fmt, width, height );
++#ifdef SWSCALE
++	struct SwsContext *context = sws_getContext( width, height, in_fmt,
++		width, height, out_fmt, SWS_FAST_BILINEAR, NULL, NULL, NULL);
++	sws_scale( context, input.data, input.linesize, 0, height,
++		output.data, output.linesize);
++	sws_freeContext( context );
++#else
+ 	img_convert( &output, out_fmt, &input, in_fmt, width, height );
++#endif
+ }
+ 
+ /** Do it :-).
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/avformat/producer_avformat.c mlt/src/modules/avformat/producer_avformat.c
+--- mlt-0.2.2/src/modules/avformat/producer_avformat.c	2005-11-10 13:26:32.000000000 +0100
++++ mlt/src/modules/avformat/producer_avformat.c	2007-03-04 06:32:11.000000000 +0100
+@@ -26,6 +26,9 @@
+ 
+ // ffmpeg Header files
+ #include <avformat.h>
++#ifdef SWSCALE
++#include <swscale.h>
++#endif
+ 
+ // System header files
+ #include <stdlib.h>
+@@ -91,6 +94,9 @@
+ 		// Get the codec context
+    		AVCodecContext *codec_context = context->streams[ i ]->codec;
+ 
++		if ( avcodec_find_decoder( codec_context->codec_id ) == NULL )
++			continue;
++
+ 		// Determine the type and obtain the first index of each type
+    		switch( codec_context->codec_type ) 
+ 		{
+@@ -242,8 +248,7 @@
+ 	}
+ 
+ 	// Now attempt to open the file
+-	error = av_open_input_file( &context, file, format, 0, params );
+-	error = error < 0;
++	error = av_open_input_file( &context, file, format, 0, params ) < 0;
+ 	
+ 	// Cleanup AVFormatParameters
+ 	free( standard );
+@@ -287,6 +292,7 @@
+ 			// Store selected audio and video indexes on properties
+ 			mlt_properties_set_int( properties, "audio_index", audio_index );
+ 			mlt_properties_set_int( properties, "video_index", video_index );
++			mlt_properties_set_int( properties, "_last_position", -1 );
+ 
+ 			// Fetch the width, height and aspect ratio
+ 			if ( video_index != -1 )
+@@ -297,11 +303,28 @@
+ 				mlt_properties_set_double( properties, "aspect_ratio", av_q2d( codec_context->sample_aspect_ratio ) );
+ 			}
+ 			
++			// Read Metadata
++			if (context->title != NULL) 
++				mlt_properties_set(properties, "meta.attr.title.markup", context->title );
++			if (context->author != NULL) 
++				mlt_properties_set(properties, "meta.attr.author.markup", context->author );
++			if (context->copyright != NULL) 
++				mlt_properties_set(properties, "meta.attr.copyright.markup", context->copyright );
++			if (context->comment != NULL) 
++				mlt_properties_set(properties, "meta.attr.comment.markup", context->comment );
++			if (context->album != NULL) 
++				mlt_properties_set(properties, "meta.attr.album.markup", context->album );
++			if (context->year != 0) 
++				mlt_properties_set_int(properties, "meta.attr.year.markup", context->year );
++			if (context->track != 0) 
++				mlt_properties_set_int(properties, "meta.attr.track.markup", context->track );
++			
+ 			// We're going to cheat here - for a/v files, we will have two contexts (reasoning will be clear later)
+ 			if ( av == 0 && !av_bypass && audio_index != -1 && video_index != -1 )
+ 			{
+ 				// We'll use the open one as our video_context
+ 				mlt_properties_set_data( properties, "video_context", context, 0, producer_file_close, NULL );
++				av_seek_frame( context, -1, 0, AVSEEK_FLAG_BACKWARD );
+ 
+ 				// And open again for our audio context
+ 				av_open_input_file( &context, file, NULL, 0, NULL );
+@@ -314,6 +337,7 @@
+ 			{
+ 				// We only have a video context
+ 				mlt_properties_set_data( properties, "video_context", context, 0, producer_file_close, NULL );
++				av_seek_frame( context, -1, 0, AVSEEK_FLAG_BACKWARD );
+ 			}
+ 			else if ( audio_index != -1 )
+ 			{
+@@ -353,6 +377,43 @@
+ 
+ static inline void convert_image( AVFrame *frame, uint8_t *buffer, int pix_fmt, mlt_image_format format, int width, int height )
+ {
++#ifdef SWSCALE
++	if ( format == mlt_image_yuv420p )
++	{
++		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
++			width, height, PIX_FMT_YUV420P, SWS_FAST_BILINEAR, NULL, NULL, NULL);
++		AVPicture output;
++		output.data[0] = buffer;
++		output.data[1] = buffer + width * height;
++		output.data[2] = buffer + ( 3 * width * height ) / 2;
++		output.linesize[0] = width;
++		output.linesize[1] = width >> 1;
++		output.linesize[2] = width >> 1;
++		sws_scale( context, frame->data, frame->linesize, 0, height,
++			output.data, output.linesize);
++		sws_freeContext( context );
++	}
++	else if ( format == mlt_image_rgb24 )
++	{
++		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
++			width, height, PIX_FMT_RGB24, SWS_FAST_BILINEAR, NULL, NULL, NULL);
++		AVPicture output;
++		avpicture_fill( &output, buffer, PIX_FMT_RGB24, width, height );
++		sws_scale( context, frame->data, frame->linesize, 0, height,
++			output.data, output.linesize);
++		sws_freeContext( context );
++	}
++	else
++	{
++		struct SwsContext *context = sws_getContext( width, height, pix_fmt,
++			width, height, PIX_FMT_YUYV422, SWS_FAST_BILINEAR, NULL, NULL, NULL);
++		AVPicture output;
++		avpicture_fill( &output, buffer, PIX_FMT_YUYV422, width, height );
++		sws_scale( context, frame->data, frame->linesize, 0, height,
++			output.data, output.linesize);
++		sws_freeContext( context );
++	}
++#else
+ 	if ( format == mlt_image_yuv420p )
+ 	{
+ 		AVPicture pict;
+@@ -376,6 +437,7 @@
+ 		avpicture_fill( &output, buffer, PIX_FMT_YUV422, width, height );
+ 		img_convert( &output, PIX_FMT_YUV422, (AVPicture *)frame, pix_fmt, width, height );
+ 	}
++#endif
+ }
+ 
+ /** Get an image from a frame.
+@@ -426,10 +488,14 @@
+ 	int ignore = 0;
+ 
+ 	// Current time calcs
+-	double current_time = mlt_properties_get_double( properties, "_current_time" );
++	int current_position = mlt_properties_get_double( properties, "_current_position" );
+ 
+ 	// We may want to use the source fps if available
+ 	double source_fps = mlt_properties_get_double( properties, "source_fps" );
++	double fps = mlt_properties_get_double( properties, "fps" );
++
++	// This is the physical frame position in the source
++	int req_position = ( int )( position / fps * source_fps );
+ 
+ 	// Get the seekable status
+ 	int seekable = mlt_properties_get_int( properties, "seekable" );
+@@ -440,6 +506,9 @@
+ 	// Hopefully provide better support for streams...
+ 	int av_bypass = mlt_properties_get_int( properties, "av_bypass" );
+ 
++	// Determines if we have to decode all frames in a sequence
++	int must_decode = 1;
++
+ 	// Set the result arguments that we know here (only *buffer is now required)
+ 	*width = codec_context->width;
+ 	*height = codec_context->height;
+@@ -465,10 +534,15 @@
+ 	// Construct the output image
+ 	*buffer = mlt_pool_alloc( size );
+ 
++	// Temporary hack to improve intra frame only
++	must_decode = strcmp( codec_context->codec->name, "mjpeg" ) &&
++				  strcmp( codec_context->codec->name, "rawvideo" ) &&
++				  strcmp( codec_context->codec->name, "dvvideo" );
++
+ 	// Seek if necessary
+ 	if ( position != expected )
+ 	{
+-		if ( position + 1 == expected )
++		if ( av_frame != NULL && position + 1 == expected )
+ 		{
+ 			// We're paused - use last image
+ 			paused = 1;
+@@ -476,24 +550,32 @@
+ 		else if ( !seekable && position > expected && ( position - expected ) < 250 )
+ 		{
+ 			// Fast forward - seeking is inefficient for small distances - just ignore following frames
+-			ignore = position - expected;
++			ignore = ( int )( ( position - expected ) / fps * source_fps );
+ 		}
+ 		else if ( seekable && ( position < expected || position - expected >= 12 ) )
+ 		{
+-			// Set to the real timecode
+-			av_seek_frame( context, -1, mlt_properties_get_double( properties, "_start_time" ) + real_timecode * 1000000.0, AVSEEK_FLAG_BACKWARD );
++			// Calculate the timestamp for the requested frame
++			int64_t timestamp = ( int64_t )( ( double )req_position / source_fps * AV_TIME_BASE );
++			if ( ( uint64_t )context->start_time != AV_NOPTS_VALUE )
++				timestamp += context->start_time;
++			if ( must_decode )
++				timestamp -= AV_TIME_BASE;
++			if ( timestamp < 0 )
++				timestamp = 0;
+ 	
+-			// Remove the cached info relating to the previous position
+-			mlt_properties_set_double( properties, "_current_time", real_timecode );
++			// Set to the timestamp
++			av_seek_frame( context, -1, timestamp, AVSEEK_FLAG_BACKWARD );
+ 
++			// Remove the cached info relating to the previous position
++			mlt_properties_set_int( properties, "_current_position", -1 );
++			mlt_properties_set_int( properties, "_last_position", -1 );
+ 			mlt_properties_set_data( properties, "av_frame", NULL, 0, NULL, NULL );
+ 			av_frame = NULL;
+ 		}
+ 	}
+ 	
+-	// Duplicate the last image if necessary
+-	if ( av_frame != NULL && ( paused || mlt_properties_get_double( properties, "_current_time" ) >= real_timecode ) &&
+-		 av_bypass == 0 )
++	// Duplicate the last image if necessary (see comment on rawvideo below)
++	if ( av_frame != NULL && ( paused || mlt_properties_get_int( properties, "_current_position" ) >= req_position ) && av_bypass == 0 )
+ 	{
+ 		// Duplicate it
+ 		convert_image( av_frame, *buffer, codec_context->pix_fmt, *format, *width, *height );
+@@ -505,19 +587,15 @@
+ 	{
+ 		int ret = 0;
+ 		int got_picture = 0;
+-		int must_decode = 1;
+-
+-		// Temporary hack to improve intra frame only
+-		if ( !strcmp( codec_context->codec->name, "mjpeg" ) )
+-			must_decode = 0;
++		int int_position = 0;
+ 
+-		memset( &pkt, 0, sizeof( pkt ) );
++		av_init_packet( &pkt );
+ 
+ 		// Construct an AVFrame for YUV422 conversion
+ 		if ( av_frame == NULL )
+ 		{
+-			av_frame = calloc( 1, sizeof( AVFrame ) );
+-			mlt_properties_set_data( properties, "av_frame", av_frame, 0, free, NULL );
++			av_frame = avcodec_alloc_frame( );
++			mlt_properties_set_data( properties, "av_frame", av_frame, 0, av_free, NULL );
+ 		}
+ 
+ 		while( ret >= 0 && !got_picture )
+@@ -529,24 +607,28 @@
+ 			if ( ret >= 0 && pkt.stream_index == index && pkt.size > 0 )
+ 			{
+ 				// Determine time code of the packet
+-				if ( pkt.dts != AV_NOPTS_VALUE )
+-					current_time = av_q2d( stream->time_base ) * pkt.dts;
+-				else
+-					current_time = real_timecode;
++				int_position = ( int )( av_q2d( stream->time_base ) * pkt.dts * source_fps );
++				if ( context->start_time != AV_NOPTS_VALUE )
++					int_position -= ( int )( context->start_time * source_fps / AV_TIME_BASE );
++
++				int last_position = mlt_properties_get_int( properties, "_last_position" );
++				if ( int_position == last_position )
++					int_position = last_position + 1;
++				mlt_properties_set_int( properties, "_last_position", int_position );
+ 
+ 				// Decode the image
+-				if ( must_decode || current_time >= real_timecode )
++				if ( must_decode || int_position >= req_position )
+ 					ret = avcodec_decode_video( codec_context, av_frame, &got_picture, pkt.data, pkt.size );
+ 
+ 				if ( got_picture )
+ 				{
+ 					// Handle ignore
+-					if ( ( int )( current_time * 100 ) < ( int )( real_timecode * 100 ) - 7 )
++					if ( int_position < req_position )
+ 					{
+ 						ignore = 0;
+ 						got_picture = 0;
+ 					}
+-					else if ( current_time >= real_timecode )
++					else if ( int_position >= req_position )
+ 					{
+ 						ignore = 0;
+ 					}
+@@ -557,36 +639,28 @@
+ 				}
+ 			}
+ 
+-			// We're finished with this packet regardless
+-			av_free_packet( &pkt );
+-		}
+-
+ 		// Now handle the picture if we have one
+ 		if ( got_picture )
+ 		{
+ 			mlt_properties_set_int( frame_properties, "progressive", !av_frame->interlaced_frame );
+ 			mlt_properties_set_int( frame_properties, "top_field_first", av_frame->top_field_first );
+-
+ 			convert_image( av_frame, *buffer, codec_context->pix_fmt, *format, *width, *height );
+-
+ 			mlt_properties_set_data( frame_properties, "image", *buffer, size, (mlt_destructor)mlt_pool_release, NULL );
+-
+-			if ( current_time == 0 && source_fps != 0 )
+-			{
+-				double fps = mlt_properties_get_double( properties, "fps" );
+-				current_time = ceil( source_fps * ( double )position / fps ) * ( 1 / source_fps );
+-				mlt_properties_set_double( properties, "_current_time", current_time );
+-			}
+-			else
+-			{
+-				mlt_properties_set_double( properties, "_current_time", current_time );
++				mlt_properties_set_double( properties, "_current_position", int_position );
+ 			}
++
++			// We're finished with this packet regardless
++			av_free_packet( &pkt );
+ 		}
+ 	}
+ 	
++	// Very untidy - for rawvideo, the packet contains the frame, hence the free packet
++	// above will break the pause behaviour - so we wipe the frame now
++	if ( !strcmp( codec_context->codec->name, "rawvideo" ) )
++		mlt_properties_set_data( properties, "av_frame", NULL, 0, NULL, NULL );
++
+ 	// Set the field order property for this frame
+-	mlt_properties_set_int( frame_properties, "top_field_first", 
+-		mlt_properties_get_int( properties, "top_field_first" ) );
++	mlt_properties_set_int( frame_properties, "top_field_first", mlt_properties_get_int( properties, "top_field_first" ) );
+ 
+ 	// Regardless of speed, we expect to get the next frame (cos we ain't too bright)
+ 	mlt_properties_set_position( properties, "_video_expected", position + 1 );
+@@ -672,6 +746,8 @@
+ 			// We'll use fps if it's available
+ 			if ( source_fps > 0 && source_fps < 30 )
+ 				mlt_properties_set_double( properties, "source_fps", source_fps );
++			else
++				mlt_properties_set_double( properties, "source_fps", mlt_properties_get_double( properties, "fps" ) );
+ 			mlt_properties_set_double( properties, "aspect_ratio", aspect_ratio );
+ 			
+ 			// Set the width and height
+@@ -805,7 +881,7 @@
+ 		int got_audio = 0;
+ 		int16_t *temp = mlt_pool_alloc( sizeof( int16_t ) * AVCODEC_MAX_AUDIO_FRAME_SIZE );
+ 
+-		memset( &pkt, 0, sizeof( pkt ) );
++		av_init_packet( &pkt );
+ 
+ 		while( ret >= 0 && !got_audio )
+ 		{
+@@ -957,6 +1033,8 @@
+ 		{
+ 			mlt_frame_push_audio( frame, producer_get_audio );
+ 			mlt_properties_set_data( frame_properties, "avformat_producer", this, 0, NULL, NULL );
++			mlt_properties_set_int( frame_properties, "frequency", codec_context->sample_rate );
++			mlt_properties_set_int( frame_properties, "channels", codec_context->channels );
+ 		}
+ 	}
+ }
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/Makefile mlt/src/modules/core/Makefile
+--- mlt-0.2.2/src/modules/core/Makefile	2006-03-02 08:25:57.000000000 +0100
++++ mlt/src/modules/core/Makefile	2007-02-18 19:03:51.000000000 +0100
+@@ -4,8 +4,10 @@
+ 
+ OBJS = factory.o \
+ 	   producer_colour.o \
++	   producer_framebuffer.o \
+ 	   producer_noise.o \
+ 	   producer_ppm.o \
++	   filter_boxblur.o \
+ 	   filter_brightness.o \
+ 	   filter_channelcopy.o \
+ 	   filter_data_feed.o \
+@@ -21,6 +23,7 @@
+ 	   filter_resize.o \
+ 	   filter_transition.o \
+ 	   filter_watermark.o \
++	   filter_wave.o \
+ 	   transition_composite.o \
+ 	   transition_luma.o \
+ 	   transition_mix.o \
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/configure mlt/src/modules/core/configure
+--- mlt-0.2.2/src/modules/core/configure	2006-03-02 08:25:57.000000000 +0100
++++ mlt/src/modules/core/configure	2007-02-18 19:03:50.000000000 +0100
+@@ -6,11 +6,13 @@
+ cat << EOF >> ../producers.dat
+ color			libmltcore$LIBSUF
+ colour			libmltcore$LIBSUF
++framebuffer		libmltcore$LIBSUF
+ noise			libmltcore$LIBSUF
+ ppm				libmltcore$LIBSUF
+ EOF
+ 
+ cat << EOF >> ../filters.dat
++boxblur			libmltcore$LIBSUF
+ brightness		libmltcore$LIBSUF
+ channelcopy		libmltcore$LIBSUF
+ data_feed		libmltcore$LIBSUF
+@@ -26,6 +28,7 @@
+ resize			libmltcore$LIBSUF
+ transition		libmltcore$LIBSUF
+ watermark		libmltcore$LIBSUF
++wave			libmltcore$LIBSUF
+ EOF
+ 
+ cat << EOF >> ../transitions.dat
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/factory.c mlt/src/modules/core/factory.c
+--- mlt-0.2.2/src/modules/core/factory.c	2006-03-02 08:25:57.000000000 +0100
++++ mlt/src/modules/core/factory.c	2007-02-18 19:03:51.000000000 +0100
+@@ -21,8 +21,10 @@
+ #include <string.h>
+ 
+ #include "producer_colour.h"
++#include "producer_framebuffer.h"
+ #include "producer_noise.h"
+ #include "producer_ppm.h"
++#include "filter_boxblur.h"
+ #include "filter_brightness.h"
+ #include "filter_channelcopy.h"
+ #include "filter_data.h"
+@@ -37,6 +39,7 @@
+ #include "filter_region.h"
+ #include "filter_transition.h"
+ #include "filter_watermark.h"
++#include "filter_wave.h"
+ #include "transition_composite.h"
+ #include "transition_luma.h"
+ #include "transition_mix.h"
+@@ -49,6 +52,8 @@
+ 		return producer_colour_init( arg );
+ 	if ( !strcmp( id, "colour" ) )
+ 		return producer_colour_init( arg );
++	if ( !strcmp( id, "framebuffer" ) )
++		return producer_framebuffer_init( arg );
+ 	if ( !strcmp( id, "noise" ) )
+ 		return producer_noise_init( arg );
+ 	if ( !strcmp( id, "ppm" ) )
+@@ -58,6 +63,8 @@
+ 
+ void *mlt_create_filter( char *id, void *arg )
+ {
++	if ( !strcmp( id, "boxblur" ) )
++		return filter_boxblur_init( arg );
+ 	if ( !strcmp( id, "brightness" ) )
+ 		return filter_brightness_init( arg );
+ 	if ( !strcmp( id, "channelcopy" ) )
+@@ -88,6 +95,8 @@
+ 		return filter_transition_init( arg );
+ 	if ( !strcmp( id, "watermark" ) )
+ 		return filter_watermark_init( arg );
++	if ( !strcmp( id, "wave" ) )
++		return filter_wave_init( arg );
+ 	return NULL;
+ }
+ 
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/filter_boxblur.c mlt/src/modules/core/filter_boxblur.c
+--- mlt-0.2.2/src/modules/core/filter_boxblur.c	1970-01-01 01:00:00.000000000 +0100
++++ mlt/src/modules/core/filter_boxblur.c	2007-02-19 09:34:50.000000000 +0100
+@@ -0,0 +1,233 @@
++/*
++ * filter_boxblur.c -- blur filter
++ * Author: Leny Grisel <leny.grisel@laposte.net>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * aint32_t with this program; if not, write to the Free Software Foundation,
++ * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ */
++
++#include "filter_boxblur.h"
++
++#include <framework/mlt_frame.h>
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <math.h>
++
++
++static void PreCompute(uint8_t *yuv, int32_t *rgb, unsigned int width, unsigned int height)
++{
++	register int x, y, z;
++	register int uneven = width % 2;
++	int w = (width - uneven ) / 2;
++	int yy, uu, vv;
++	int r, g, b;
++	int32_t pts[3];
++	for (y=0; y<height; y++)
++	{
++		for (x=0; x<w; x++)
++		{
++			uu = yuv[1];
++			vv = yuv[3];
++			yy = yuv[0];
++			YUV2RGB(yy, uu, vv, r, g, b);
++			pts[0] = r;
++			pts[1] = g;
++			pts[2] = b;
++			for (z = 0; z < 3; z++) 
++			{
++				if (x>0) pts[z]+=rgb[-3];
++				if (y>0) pts[z]+=rgb[-(width*3)];
++				if (x>0 && y>0) pts[z]-=rgb[-((width+1)*3)];
++				*rgb++=pts[z];
++            		}
++
++			yy = yuv[2];
++			YUV2RGB(yy, uu, vv, r, g, b);
++			pts[0] = r;
++			pts[1] = g;
++			pts[2] = b;
++			for (z = 0; z < 3; z++)
++			{
++				pts[z]+=rgb[-3];
++				if (y>0)
++				{
++					pts[z]+=rgb[-(width*3)];
++					pts[z]-=rgb[-((width+1)*3)];
++				}
++				*rgb++=pts[z];
++			}
++			yuv += 4;
++		}
++		if (uneven) 
++		{
++			uu = yuv[1];
++			vv = yuv[3];
++			yy = yuv[0];
++			YUV2RGB(yy, uu, vv, r, g, b);
++			pts[0] = r;
++			pts[1] = g;
++			pts[2] = b;
++			for (z = 0; z < 3; z++)
++			{
++				pts[z]+=rgb[-3];
++				if (y>0)
++				{
++					pts[z]+=rgb[-(width*3)];
++					pts[z]-=rgb[-((width+1)*3)];
++				}
++				*rgb++=pts[z];
++			}
++			yuv += 2;
++		}
++	}
++}
++
++static int32_t GetRGB(int32_t *rgb, unsigned int w, unsigned int h, unsigned int x, int offsetx, unsigned int y, int offsety, unsigned int z)
++{
++	int xtheo = x * 2 + offsetx;
++	int ytheo = y + offsety;
++	if (xtheo < 0) xtheo = 0; else if (xtheo >= w) xtheo = w - 1;
++	if (ytheo < 0) ytheo = 0; else if (ytheo >= h) ytheo = h - 1;
++	return rgb[3*(xtheo+ytheo*w)+z];
++}
++
++static int32_t GetRGB2(int32_t *rgb, unsigned int w, unsigned int h, unsigned int x, int offsetx, unsigned int y, int offsety, unsigned int z)
++{
++	int xtheo = x * 2 + 1 + offsetx;
++	int ytheo = y + offsety;
++	if (xtheo < 0) xtheo = 0; else if (xtheo >= w) xtheo = w - 1;
++	if (ytheo < 0) ytheo = 0; else if (ytheo >= h) ytheo = h - 1;
++	return rgb[3*(xtheo+ytheo*w)+z];
++}
++
++static void DoBoxBlur(uint8_t *yuv, int32_t *rgb, unsigned int width, unsigned int height, unsigned int boxw, unsigned int boxh)
++{
++	register int x, y;
++	int32_t r, g, b;
++	register int uneven = width % 2;
++	register int y0, y1, u0, u1, v0, v1;
++	int w = (width - uneven ) / 2;
++	float mul = 1.f / ((boxw*2) * (boxh*2));
++
++	for (y = 0; y < height; y++)
++	{
++		for (x = 0; x < w; x++)
++		{
++			r = GetRGB(rgb, width, height, x, +boxw, y, +boxh, 0) + GetRGB(rgb, width, height, x, -boxw, y, -boxh, 0) - GetRGB(rgb, width, height, x, -boxw, y, + boxh, 0) - GetRGB(rgb, width, height, x, +boxw, y, -boxh, 0);
++			g = GetRGB(rgb, width, height, x, +boxw, y, +boxh, 1) + GetRGB(rgb, width, height, x, -boxw, y, -boxh, 1) - GetRGB(rgb, width, height, x, -boxw, y, +boxh, 1) - GetRGB(rgb, width, height, x, +boxw, y, -boxh, 1);
++			b = GetRGB(rgb, width, height, x, +boxw, y, +boxh, 2) + GetRGB(rgb, width, height, x, -boxw, y, -boxh, 2) - GetRGB(rgb, width, height, x, -boxw, y, +boxh, 2) - GetRGB(rgb, width, height, x, +boxw, y, -boxh, 2);
++            		r = (int32_t) (r * mul);
++			g = (int32_t) (g * mul);
++			b = (int32_t) (b * mul);
++			RGB2YUV (r, g, b, y0, u0, v0);
++
++			r = GetRGB2(rgb, width, height, x, +boxw, y, +boxh, 0) + GetRGB2(rgb, width, height, x, -boxw, y, -boxh, 0) - GetRGB2(rgb, width, height, x, -boxw, y, +boxh, 0) - GetRGB2(rgb, width, height, x, +boxw, y, -boxh, 0);
++			g = GetRGB2(rgb, width, height, x, +boxw, y, +boxh, 1) + GetRGB2(rgb, width, height, x, -boxw, y, -boxh, 1) - GetRGB2(rgb, width, height, x, -boxw, y, +boxh, 1) - GetRGB2(rgb, width, height, x, +boxw, y, -boxh, 1);
++			b = GetRGB2(rgb, width, height, x, +boxw, y, +boxh, 2) + GetRGB2(rgb, width, height, x, -boxw, y, -boxh, 2) - GetRGB2(rgb, width, height, x, -boxw, y, +boxh, 2) - GetRGB2(rgb, width, height, x, +boxw, y, -boxh, 2);
++			r = (int32_t) (r * mul);
++			g = (int32_t) (g * mul);
++			b = (int32_t) (b * mul);
++			RGB2YUV (r, g, b, y1, u1, v1);
++			*yuv++ = y0;
++			*yuv++ = (u0+u1) >> 1;
++			*yuv++ = y1;
++			*yuv++ = (v0+v1) >> 1;
++		}
++		if (uneven)
++		{
++			r =  GetRGB(rgb, width, height, x, +boxw, y, +boxh, 0) + GetRGB(rgb, width, height, x, -boxw, y, -boxh, 0) - GetRGB(rgb, width, height, x, -boxw, y, +boxh, 0) - GetRGB(rgb, width, height, x, +boxw, y, -boxh, 0);
++			g =  GetRGB(rgb, width, height, x, +boxw, y, +boxh, 1) + GetRGB(rgb, width, height, x, -boxw, y, -boxh, 1) - GetRGB(rgb, width, height, x, -boxw, y, +boxh, 1) - GetRGB(rgb, width, height, x, +boxw, y, -boxh, 1);
++			b =  GetRGB(rgb, width, height, x, +boxw, y, +boxh, 2) + GetRGB(rgb, width, height, x, -boxw, y, -boxh, 2) - GetRGB(rgb, width, height, x, -boxw, y, +boxh, 2) - GetRGB(rgb, width, height, x, +boxw, y, -boxh, 2);
++			r = (int32_t) (r * mul);
++			g = (int32_t) (g * mul);
++			b = (int32_t) (b * mul);
++			RGB2YUV (r, g, b, y0, u0, v0);
++			*yuv++ = mul * y0;
++			*yuv++ = mul * u0;
++		}
++	}
++}
++
++static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *format, int *width, int *height, int writable )
++{
++	// Get the image
++	int error = mlt_frame_get_image( this, image, format, width, height, 1 );
++	short hori = mlt_properties_get_int(MLT_FRAME_PROPERTIES( this ), "hori" );
++	short vert = mlt_properties_get_int(MLT_FRAME_PROPERTIES( this ), "vert" );
++
++	// Only process if we have no error and a valid colour space
++	if ( error == 0 && *format == mlt_image_yuv422 )
++	{
++		double factor = mlt_properties_get_double( MLT_FRAME_PROPERTIES( this ), "boxblur" );
++		if (factor != 0) {
++			int h = *height + 1;
++			int32_t *rgb = mlt_pool_alloc (3 * *width * h * sizeof(int32_t));
++			PreCompute (*image, rgb, *width, h);
++			DoBoxBlur (*image, rgb, *width, h, (int) factor*hori, (int) factor*vert);
++			mlt_pool_release (rgb);
++		}
++    	}
++	return error;
++}
++
++/** Filter processing.
++*/
++
++static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
++{
++	// Get the starting blur level
++	double blur = (double) mlt_properties_get_int( MLT_FILTER_PROPERTIES( this ), "start" );
++	short hori = mlt_properties_get_int(MLT_FILTER_PROPERTIES( this ), "hori" );
++	short vert = mlt_properties_get_int(MLT_FILTER_PROPERTIES( this ), "vert" );
++
++	// If there is an end adjust gain to the range
++	if ( mlt_properties_get( MLT_FILTER_PROPERTIES( this ), "end" ) != NULL )
++	{
++		// Determine the time position of this frame in the transition duration
++		mlt_position in = mlt_filter_get_in( this );
++		mlt_position out = mlt_filter_get_out( this );
++		mlt_position time = mlt_frame_get_position( frame );
++		double position = (double) ( time - in ) / ( out - in + 1.0 );
++		double end = (double) mlt_properties_get_int( MLT_FILTER_PROPERTIES( this ), "end" );
++		blur += ( end - blur ) * position;
++	}
++
++	// Push the frame filter
++	mlt_properties_set_double( MLT_FRAME_PROPERTIES( frame ), "boxblur", blur );
++	mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "hori", hori );
++	mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "vert", vert );
++	mlt_frame_push_get_image( frame, filter_get_image );
++
++	return frame;
++}
++
++/** Constructor for the filter.
++*/
++
++mlt_filter filter_boxblur_init( char *arg )
++{
++	mlt_filter this = mlt_filter_new( );
++	if ( this != NULL )
++	{
++		this->process = filter_process;
++		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "start", arg == NULL ? "10" : arg);
++		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "hori", arg == NULL ? "1" : arg);
++		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "vert", arg == NULL ? "1" : arg);
++	}
++	return this;
++}
++
++
++
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/filter_boxblur.h mlt/src/modules/core/filter_boxblur.h
+--- mlt-0.2.2/src/modules/core/filter_boxblur.h	1970-01-01 01:00:00.000000000 +0100
++++ mlt/src/modules/core/filter_boxblur.h	2007-02-19 09:34:51.000000000 +0100
+@@ -0,0 +1,27 @@
++/*
++ * filter_boxblur.h -- box blur filter
++ * Author: Leny Grisel <leny.grisel@laposte.net>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ */
++
++#ifndef _FILTER_BOXBLUR_H_
++#define _FILTER_BOXBLUR_H_
++
++#include <framework/mlt_filter.h>
++
++extern mlt_filter filter_boxblur_init( char *arg );
++
++#endif
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/filter_data_show.c mlt/src/modules/core/filter_data_show.c
+--- mlt-0.2.2/src/modules/core/filter_data_show.c	2005-01-31 15:47:32.000000000 +0100
++++ mlt/src/modules/core/filter_data_show.c	2007-01-24 00:20:50.000000000 +0100
+@@ -83,6 +83,34 @@
+ 	return result;
+ }
+ 
++/** Retrieve medatata value 
++*/
++
++const char* metadata_value(mlt_properties properties, char* name)
++{
++	if (name == NULL) return "-";
++	char *meta = malloc( strlen(name) + 18 );
++	sprintf( meta, "meta.attr.%s.markup", name);
++	return mlt_properties_get( properties, meta);
++}
++
++/** Convert frames to Timecode 
++*/
++
++const char* frame_to_timecode( int frames , int fps)
++{
++	char *res = malloc(12);
++	if (fps == 0) return "-";
++	int seconds = frames / (int) fps;
++	frames = frames % ((int) fps);
++	int minutes = seconds / 60;
++	seconds = seconds % 60;
++	int hours = minutes / 60;
++	minutes = minutes % 60;
++	sprintf(res, "%.2d:%.2d:%.2d:%.2d", hours, minutes, seconds, frames);
++	return res;
++}
++
+ /** Process the frame for the requested type
+ */
+ 
+@@ -144,8 +172,39 @@
+ 				else
+ 				{
+ 					char *value = mlt_properties_get( feed, name + len );
+-					if ( value != NULL )
+-						mlt_properties_set( properties, key, value );
++					if ( value != NULL ) {
++						// check for metadata keywords in metadata markup if user requested so
++						if ( mlt_properties_get_int( filter_properties, "dynamic" ) == 1  && !strcmp( name + strlen( name ) - 6, "markup") )
++						{
++							// Find keywords which should be surrounded by '#', like: #title#
++							char* keywords = strtok ( value, "\\#" );
++							char result[] = "";
++							int ct = 0;
++							int fromStart = 0;
++							if ( value[0] == '\\' ) fromStart = 1;
++							
++							while (keywords != NULL) {
++								if (ct % 2 == fromStart) 
++									strcat( result, keywords);
++								else if (!strcmp(keywords, "timecode")) {
++									// special case: replace #tc# with current frame timecode
++									int pos = mlt_properties_get_int( feed, "position" );
++									const char *tc = frame_to_timecode(pos, mlt_properties_get_int( MLT_FRAME_PROPERTIES( frame ), "fps" ));
++									strcat( result, tc);
++								}
++								else {
++									// replace keyword with metadata value
++									const char * metavalue = metadata_value(MLT_FRAME_PROPERTIES( frame ), keywords);
++									if (metavalue == NULL) metavalue = "-";
++									strcat( result, metavalue);
++								}
++								keywords = strtok ( NULL, "\\#" );
++								ct++;
++							}
++							mlt_properties_set( properties, key, (char*) result );
++						}
++						else mlt_properties_set( properties, key, value );
++					}
+ 				}
+ 			}
+ 		}
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/filter_obscure.c mlt/src/modules/core/filter_obscure.c
+--- mlt-0.2.2/src/modules/core/filter_obscure.c	2005-01-14 14:02:59.000000000 +0100
++++ mlt/src/modules/core/filter_obscure.c	2006-10-17 00:31:45.000000000 +0200
+@@ -256,8 +256,8 @@
+ 			struct geometry_s start;
+ 			struct geometry_s end;
+ 
+-			// Calculate the position
+-			float position = position_calculate( this, frame );
++			// Retrieve the position
++			float position = mlt_properties_get_double(frame_properties, "filter_position");
+ 
+ 			// Now parse the geometries
+ 			geometry_parse( &start, NULL, mlt_properties_get( properties, "start" ), normalised_width, normalised_height );
+@@ -282,6 +282,10 @@
+ 	// Push this on to the service stack
+ 	mlt_frame_push_service( frame, this );
+ 	
++	// Calculate the position for the filter effect
++	float position = position_calculate( this, frame );
++	mlt_properties_set_double( MLT_FRAME_PROPERTIES( frame ), "filter_position", position );
++
+ 	// Push the get image call
+ 	mlt_frame_push_get_image( frame, filter_get_image );
+ 
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/filter_rescale.c mlt/src/modules/core/filter_rescale.c
+--- mlt-0.2.2/src/modules/core/filter_rescale.c	2005-09-28 15:56:48.000000000 +0200
++++ mlt/src/modules/core/filter_rescale.c	2006-10-26 11:05:48.000000000 +0200
+@@ -62,21 +62,21 @@
+ 				uint8_t *alpha = mlt_pool_alloc( iwidth * ( iheight + 1 ) );
+ 
+ 				// Convert the image and extract alpha
+-				mlt_convert_rgb24a_to_yuv422( *image, iwidth, iheight, iwidth * 2, output, alpha );
++				mlt_convert_rgb24a_to_yuv422( *image, iwidth, iheight, iwidth * 4, output, alpha );
+ 
+ 				mlt_properties_set_data( properties, "alpha", alpha, iwidth * ( iheight + 1 ), ( mlt_destructor )mlt_pool_release, NULL );
+ 			}
+ 			else
+ 			{
+ 				// No alpha to extract
+-				mlt_convert_rgb24_to_yuv422( *image, iwidth, iheight, iwidth * 2, output );
++				mlt_convert_rgb24_to_yuv422( *image, iwidth, iheight, iwidth * 3, output );
+ 			}
+ 
++			mlt_properties_set_data( properties, "image", output, iwidth * ( iheight + 1 ) * 2, ( mlt_destructor )mlt_pool_release, NULL );
++
+ 			// Scale the frame
+-			mlt_frame_rescale_yuv422( this, owidth, oheight );
++			output = mlt_frame_rescale_yuv422( this, owidth, oheight );
+ 		
+-			// Return the output
+-			*image = mlt_properties_get_data( properties, "image", NULL );
+ 		}
+ 		else
+ 		{
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/filter_wave.c mlt/src/modules/core/filter_wave.c
+--- mlt-0.2.2/src/modules/core/filter_wave.c	1970-01-01 01:00:00.000000000 +0100
++++ mlt/src/modules/core/filter_wave.c	2007-02-19 09:34:51.000000000 +0100
+@@ -0,0 +1,138 @@
++/*
++ * wave.c -- wave filter
++ * Author: Leny Grisel <leny.grisel@laposte.net>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * aint32_t with this program; if not, write to the Free Software Foundation,
++ * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ */
++
++#include "filter_wave.h"
++
++#include <framework/mlt_frame.h>
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <math.h>
++
++// this is a utility function used by DoWave below
++static uint8_t getPoint(uint8_t *src, int w, int h, int x, int y, int z)
++{
++	if (x<0) x+=-((-x)%w)+w; else if (x>=w) x=x%w;
++	if (y<0) y+=-((-y)%h)+h; else if (y>=h) y=y%h;
++	return src[(x+y*w)*4+z];
++}
++
++// the main meat of the algorithm lies here
++static void DoWave(uint8_t *src, int src_w, int src_h, uint8_t *dst, mlt_position position, int speed, int factor, int deformX, int deformY)
++{
++	register int x, y;
++	int decalY, decalX, z;
++	float amplitude, phase, pulsation;
++	register int uneven = src_w % 2;
++	int w = (src_w - uneven ) / 2;
++	amplitude = factor;
++	pulsation = 0.5 / factor;   // smaller means bigger period
++	phase = position * pulsation * speed / 10; // smaller means longer
++	for (y=0;y<src_h;y++) {
++		decalX = deformX ? sin(pulsation * y + phase) * amplitude : 0;
++		for (x=0;x<w;x++) {
++			decalY = deformY ? sin(pulsation * x * 2 + phase) * amplitude : 0;
++			for (z=0; z<4; z++)
++                		*dst++ = getPoint(src, w, src_h, (x+decalX), (y+decalY), z);
++		}
++		if (uneven) {
++			decalY = sin(pulsation * x * 2 + phase) * amplitude;
++			for (z=0; z<2; z++)
++				*dst++ = getPoint(src, w, src_h, (x+decalX), (y+decalY), z);
++		}
++	}
++}
++
++static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *format, int *width, int *height, int writable )
++{
++	// Get the image
++	int error = mlt_frame_get_image( this, image, format, width, height, 1 );
++	mlt_position position = mlt_frame_get_position( this );
++
++	// Only process if we have no error and a valid colour space
++	if ( error == 0 && *format == mlt_image_yuv422 )
++	{
++		double factor = mlt_properties_get_int( MLT_FRAME_PROPERTIES( this ), "wave" );
++		int speed = mlt_properties_get_int( MLT_FRAME_PROPERTIES( this ), "speed" );
++        	int deformX = mlt_properties_get_int( MLT_FRAME_PROPERTIES( this ), "deformX" );
++        	int deformY = mlt_properties_get_int( MLT_FRAME_PROPERTIES( this ), "deformY" );
++        	if (factor != 0) {
++			int image_size = *width * (*height + 1) * 2;
++            		int8_t *dest = mlt_pool_alloc (image_size);
++            		DoWave(*image, *width, (*height + 1), dest, position, speed, factor, deformX, deformY);
++            		memcpy(*image, dest, image_size);
++            		mlt_pool_release(dest);
++        	}
++    	}
++
++	return error;
++}
++
++/** Filter processing.
++*/
++
++static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
++{
++	// Get the starting wave level
++	double wave = mlt_properties_get_double( MLT_FILTER_PROPERTIES( this ), "start" );
++	int speed = mlt_properties_get_int( MLT_FILTER_PROPERTIES( this ), "speed" );
++	int deformX = mlt_properties_get_int( MLT_FILTER_PROPERTIES( this ), "deformX" );
++	int deformY = mlt_properties_get_int( MLT_FILTER_PROPERTIES( this ), "deformY" );
++
++	// If there is an end adjust gain to the range
++	if ( mlt_properties_get( MLT_FILTER_PROPERTIES( this ), "end" ) != NULL )
++	{
++		// Determine the time position of this frame in the transition duration
++		mlt_position in = mlt_filter_get_in( this );
++		mlt_position out = mlt_filter_get_out( this );
++		mlt_position time = mlt_frame_get_position( frame );
++		double position = ( double )( time - in ) / ( double )( out - in + 1 );
++		double end = fabs( mlt_properties_get_double( MLT_FILTER_PROPERTIES( this ), "end" ) );
++		wave += ( end - wave ) * position;
++	}
++
++	// Push the frame filter
++	mlt_properties_set_double( MLT_FRAME_PROPERTIES( frame ), "wave", wave );
++	mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "speed", speed );
++	mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "deformX", deformX );
++	mlt_properties_set_int( MLT_FRAME_PROPERTIES( frame ), "deformY", deformY );
++	mlt_frame_push_get_image( frame, filter_get_image );
++
++	return frame;
++}
++
++/** Constructor for the filter.
++*/
++
++mlt_filter filter_wave_init( char *arg )
++{
++	mlt_filter this = mlt_filter_new( );
++	if ( this != NULL )
++	{
++		this->process = filter_process;
++		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "start", arg == NULL ? "10" : arg);
++		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "speed", arg == NULL ? "5" : arg);
++		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "deformX", arg == NULL ? "1" : arg);
++		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "deformY", arg == NULL ? "1" : arg);
++		}
++	return this;
++}
++
++
++
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/filter_wave.h mlt/src/modules/core/filter_wave.h
+--- mlt-0.2.2/src/modules/core/filter_wave.h	1970-01-01 01:00:00.000000000 +0100
++++ mlt/src/modules/core/filter_wave.h	2007-02-19 09:34:51.000000000 +0100
+@@ -0,0 +1,27 @@
++/*
++ * filter_wave.h -- wave filter
++ * Author: Leny Grisel <leny.grisel@laposte.net>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ */
++
++#ifndef _FILTER_WAVE_H_
++#define _FILTER_WAVE_H_
++
++#include <framework/mlt_filter.h>
++
++extern mlt_filter filter_wave_init( char *arg );
++
++#endif
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/producer_framebuffer.c mlt/src/modules/core/producer_framebuffer.c
+--- mlt-0.2.2/src/modules/core/producer_framebuffer.c	1970-01-01 01:00:00.000000000 +0100
++++ mlt/src/modules/core/producer_framebuffer.c	2006-11-20 12:13:11.000000000 +0100
+@@ -0,0 +1,284 @@
++/*
++ * producer_framebuffer.c -- create subspeed frames
++ * Author: Jean-Baptiste Mardelle, based on the code of motion_est by Zachary Drew
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ */
++
++#include "producer_framebuffer.h"
++#include <framework/mlt.h>
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <math.h>
++#include <string.h>
++#include <sys/time.h>
++#include <assert.h>
++
++// Image stack(able) method
++static int framebuffer_get_image( mlt_frame this, uint8_t **image, mlt_image_format *format, int *width, int *height, int writable )
++{
++
++	// Get the filter object and properties
++	mlt_producer producer = mlt_frame_pop_service( this );
++	mlt_frame first_frame = mlt_frame_pop_service( this );
++
++	mlt_properties producer_properties = MLT_PRODUCER_PROPERTIES( producer );
++
++
++	// Frame properties objects
++	mlt_properties frame_properties = MLT_FRAME_PROPERTIES( this );
++	mlt_properties first_frame_properties = MLT_FRAME_PROPERTIES( first_frame );
++
++	// image stride
++	int size, xstride, ystride;
++	switch( *format ){
++		case mlt_image_yuv422:
++			size = *width * *height * 2;
++			xstride = 2;
++			ystride = 2 * *width;
++			break;
++		default:
++			fprintf(stderr, "Unsupported image format\n");
++			return -1;
++	}
++
++	uint8_t *output = mlt_properties_get_data( producer_properties, "output_buffer", 0 );
++	if( output == NULL )
++	{
++		output = mlt_pool_alloc( size );
++
++		// Let someone else clean up
++		mlt_properties_set_data( producer_properties, "output_buffer", output, size, mlt_pool_release, NULL ); 
++	}
++
++	uint8_t *first_image = mlt_properties_get_data( first_frame_properties, "image", NULL );
++
++	// which frames are buffered?
++
++	int error = 0;
++
++	if( first_image == NULL )
++	{
++		error = mlt_frame_get_image( first_frame, &first_image, format, width, height, writable );
++
++		if( error != 0 ) {
++			fprintf(stderr, "first_image == NULL get image died\n");
++			return error;
++		}
++	}
++
++	// Start with a base image
++	memcpy( output, first_image, size );
++
++	*image = output;
++	mlt_properties_set_data( frame_properties, "image", output, size, NULL, NULL );
++
++	// Make sure that no further scaling is done
++	mlt_properties_set( frame_properties, "rescale.interps", "none" );
++	mlt_properties_set( frame_properties, "scale", "off" );
++
++	mlt_frame_close( first_frame );
++
++	return 0;
++}
++
++static int framebuffer_get_frame( mlt_producer this, mlt_frame_ptr frame, int index )
++{
++	// Construct a new frame
++	*frame = mlt_frame_init( );
++	mlt_properties properties = MLT_PRODUCER_PROPERTIES(this);
++
++	if( frame != NULL )
++	{
++		mlt_frame first_frame = mlt_properties_get_data( properties, "first_frame", NULL );
++
++		mlt_position first_position = (first_frame != NULL) ? mlt_frame_get_position( first_frame ) : -1;
++
++		// Get the real producer
++		mlt_producer real_producer = mlt_properties_get_data( properties, "producer", NULL );
++
++		// Our "in" needs to be the same, keep it so
++		mlt_properties_pass_list( MLT_PRODUCER_PROPERTIES( real_producer ), properties, "in" );
++
++		// get properties		
++		int strobe = mlt_properties_get_int( MLT_PRODUCER_PROPERTIES (this), "strobe");
++		double freeze = mlt_properties_get_double( MLT_PRODUCER_PROPERTIES (this), "freeze");
++		int freeze_after = mlt_properties_get_int( MLT_PRODUCER_PROPERTIES (this), "freeze_after");
++		int freeze_before = mlt_properties_get_int( MLT_PRODUCER_PROPERTIES (this), "freeze_before");
++
++		mlt_position need_first;
++
++		if (!freeze || freeze_after || freeze_before) {
++			double prod_speed = mlt_properties_get_double( properties, "_speed");
++			double prod_end_speed = mlt_properties_get_double( properties, "end_speed");
++
++			// calculate actual speed and position
++			double actual_speed = prod_speed + ((double)mlt_producer_position( this ) / (double)mlt_producer_get_length(this)) * (prod_end_speed - prod_speed);
++			double actual_position = actual_speed * (double)mlt_producer_position( this );
++			if (mlt_properties_get_int( properties, "reverse")) actual_position = mlt_producer_get_length(this) - actual_position;
++
++			if (strobe < 2)
++			{ 
++				need_first = floor( actual_position );
++			}
++			else 
++			{
++				// Strobe effect wanted, calculate frame position
++				need_first = floor( actual_position );
++				need_first -= need_first%strobe;
++			}
++			if (freeze)
++			{
++				if (freeze_after && need_first > freeze) need_first = freeze;
++				else if (freeze_before && need_first < freeze) need_first = freeze;
++			}
++		}
++		else need_first = freeze;
++
++		if( need_first != first_position )
++		{
++			mlt_frame_close( first_frame );
++			first_position = -1;
++			first_frame = NULL;
++		}
++
++		if( first_frame == NULL )
++		{
++			// Seek the producer to the correct place
++			mlt_producer_seek( real_producer, need_first );
++
++			// Get the frame
++			mlt_service_get_frame( MLT_PRODUCER_SERVICE( real_producer ), &first_frame, index );
++		}
++
++
++		// Make sure things are in their place
++		mlt_properties_set_data( properties, "first_frame", first_frame, 0, NULL, NULL );
++
++		// Stack the producer and producer's get image
++		mlt_frame_push_service( *frame, first_frame );
++		mlt_properties_inc_ref( MLT_FRAME_PROPERTIES( first_frame ) );
++
++		mlt_frame_push_service( *frame, this );
++		mlt_frame_push_service( *frame, framebuffer_get_image );
++
++		// Give the returned frame temporal identity
++		mlt_frame_set_position( *frame, mlt_producer_position( this ) );
++
++	}
++
++	return 0;
++}
++
++
++mlt_producer producer_framebuffer_init( char *arg )
++{
++	mlt_producer this = mlt_producer_new( );
++
++	// Wrap fezzik
++	mlt_producer real_producer;
++	
++	// Check if a speed was specified.
++	/** 
++
++	* Speed must be appended to the filename with ':'. To play your video at 50%:
++	 inigo framebuffer:my_video.mpg:0.5
++
++	* You can have a variabl speed by specifying a start and an end speed:
++	inigo framebuffer:my_video.mpg:0.5:1.0
++	
++	* Stroboscope effect can be obtained by adding a stobe=x parameter, where
++	 x is the number of frames that will be ignored.
++
++	* You can play the movie backwards by adding reverse=1
++
++	* You can freeze the clip at a determined position by adding freeze=frame_pos
++	  add freeze_after=1 to freeze only paste position or freeze_before to freeze before it
++
++	**/
++
++	double speed;
++	double end_speed;
++	int count;
++	char *props = strdup( arg );
++	char *ptr = props;
++	count = strcspn( ptr, ":" );
++	ptr[count] = '\0';
++	real_producer = mlt_factory_producer( "fezzik", ptr );
++
++	ptr += count + 1;
++	ptr += strspn( ptr, ":" );
++	count = strcspn( ptr, ":" );
++	ptr[count] = '\0';
++	speed = atof(ptr);
++
++	ptr += count + 1;
++	ptr += strspn( ptr, ":" );
++	count = strcspn( ptr, ":" );
++	ptr[count] = '\0';
++	end_speed = atof(ptr);
++	free( props );
++
++	// If no end speed specified, use constant speed
++	if (speed == 0.0) speed = 1.0;
++	if (end_speed == 0.0) end_speed = speed;
++
++
++	if ( this != NULL && real_producer != NULL)
++	{
++		// Get the properties of this producer
++		mlt_properties properties = MLT_PRODUCER_PROPERTIES( this );
++
++		// Fezzik normalised it for us already
++		mlt_properties_set_int( properties, "fezzik_normalised", 1);
++
++		// Store the producer and fitler
++		mlt_properties_set_data( properties, "producer", real_producer, 0, ( mlt_destructor )mlt_producer_close, NULL );
++
++		// Grap some stuff from the real_producer
++		mlt_properties_pass_list( properties, MLT_PRODUCER_PROPERTIES( real_producer ),
++				"in, out, length, resource" );
++
++		if (speed != 1.0 || end_speed !=1.0)
++		{
++			// Speed is not 1.0, so adjust the clip length
++			mlt_position real_out = mlt_properties_get_position(properties, "out");
++			mlt_properties_set_position( properties, "out", real_out * 2 / (speed + end_speed)); 
++			mlt_properties_set_position( properties, "length", real_out * 2 / (speed + end_speed) + 1);
++			mlt_properties_set_double( properties, "_speed", speed);
++			mlt_properties_set_double( properties, "end_speed", end_speed);
++		}
++		else mlt_properties_set_double( properties, "end_speed", 1.0);
++
++		// Since we control the seeking, prevent it from seeking on its own
++		mlt_producer_set_speed( real_producer, 0 );
++		mlt_producer_set_speed( this, speed );
++
++		// Override the get_frame method
++		this->get_frame = framebuffer_get_frame;
++
++	}
++	else
++	{
++		if ( this )
++			mlt_producer_close( this );
++		if ( real_producer )
++			mlt_producer_close( real_producer );
++
++		this = NULL;
++	}
++	return this;
++}
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/producer_framebuffer.h mlt/src/modules/core/producer_framebuffer.h
+--- mlt-0.2.2/src/modules/core/producer_framebuffer.h	1970-01-01 01:00:00.000000000 +0100
++++ mlt/src/modules/core/producer_framebuffer.h	2006-11-18 15:52:44.000000000 +0100
+@@ -0,0 +1,27 @@
++/*
++ * producer_framebuffer.h -- slowmotion and reverse playing
++ * Copyright (C) 2006 Jean-Baptiste Mardelle <jb@ader.ch>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ */
++
++#ifndef _PRODUCER_FRAMEBUFFER_H_
++#define _PRODUCER_FRAMEBUFFER_H_
++
++#include <framework/mlt_producer.h>
++
++extern mlt_producer producer_framebuffer_init( char *arg );
++
++#endif
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/core/transition_luma.c mlt/src/modules/core/transition_luma.c
+--- mlt-0.2.2/src/modules/core/transition_luma.c	2005-10-10 11:28:12.000000000 +0200
++++ mlt/src/modules/core/transition_luma.c	2006-11-05 13:10:55.000000000 +0100
+@@ -369,6 +369,9 @@
+ 	// Get the properties of the b frame
+ 	mlt_properties b_props = MLT_FRAME_PROPERTIES( b_frame );
+ 
++	// This compositer is yuv422 only
++	*format = mlt_image_yuv422;
++
+ 	// The cached luma map information
+ 	int luma_width = mlt_properties_get_int( properties, "width" );
+ 	int luma_height = mlt_properties_get_int( properties, "height" );
+@@ -512,6 +515,7 @@
+ 	if ( mlt_properties_get( properties, "fixed" ) )
+ 		mix = mlt_properties_get_double( properties, "fixed" );
+ 
++
+ 	if ( luma_width > 0 && luma_height > 0 && luma_bitmap != NULL )
+ 		// Composite the frames using a luma map
+ 		luma_composite( !invert ? a_frame : b_frame, !invert ? b_frame : a_frame, luma_width, luma_height, luma_bitmap, mix, frame_delta,
+@@ -520,6 +524,7 @@
+ 		// Dissolve the frames using the time offset for mix value
+ 		dissolve_yuv( a_frame, b_frame, mix, *width, *height );
+ 
++
+ 	// Extract the a_frame image info
+ 	*width = mlt_properties_get_int( !invert ? a_props : b_props, "width" );
+ 	*height = mlt_properties_get_int( !invert ? a_props : b_props, "height" );
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/dv/producer_libdv.c mlt/src/modules/dv/producer_libdv.c
+--- mlt-0.2.2/src/modules/dv/producer_libdv.c	2006-01-08 21:16:56.000000000 +0100
++++ mlt/src/modules/dv/producer_libdv.c	2006-09-28 19:35:22.000000000 +0200
+@@ -478,6 +478,10 @@
+ 		mlt_properties_set_double( properties, "aspect_ratio", 
+ 				dv_format_wide( dv_decoder ) ? ( this->is_pal ? 118.0/81.0 : 40.0/33.0 ) : ( this->is_pal ? 59.0/54.0 : 10.0/11.0 ) );
+ 	
++
++		mlt_properties_set_int( properties, "frequency", dv_decoder->audio->frequency );
++		mlt_properties_set_int( properties, "channels", dv_decoder->audio->num_channels );
++
+ 		// Hmm - register audio callback
+ 		mlt_frame_push_audio( *frame, producer_get_audio );
+ 	
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/fezzik.dict mlt/src/modules/fezzik.dict
+--- mlt-0.2.2/src/modules/fezzik.dict	2006-03-29 10:59:07.000000000 +0200
++++ mlt/src/modules/fezzik.dict	2006-11-05 15:45:59.000000000 +0100
+@@ -1,6 +1,7 @@
+ http://*=avformat
+ <?xml*=westley-xml
+ *.westley=westley
++*.kdenlive=westley
+ *.inigo=inigo_file
+ *.asf=avformat
+ *.avi=mcdv,libdv,avformat
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/gtk2/producer_pixbuf.c mlt/src/modules/gtk2/producer_pixbuf.c
+--- mlt-0.2.2/src/modules/gtk2/producer_pixbuf.c	2006-05-22 02:59:48.000000000 +0200
++++ mlt/src/modules/gtk2/producer_pixbuf.c	2006-08-14 11:21:25.000000000 +0200
+@@ -55,7 +55,6 @@
+ static int producer_get_frame( mlt_producer parent, mlt_frame_ptr frame, int index );
+ static void producer_close( mlt_producer parent );
+ 
+-
+ mlt_producer producer_pixbuf_init( char *filename )
+ {
+ 	producer_pixbuf this = calloc( sizeof( struct producer_pixbuf_s ), 1 );
+@@ -100,6 +99,11 @@
+ 	// Obtain properties of producer
+ 	mlt_properties producer_props = MLT_PRODUCER_PROPERTIES( producer );
+ 
++	// Obtain the cache flag and structure
++	int use_cache = mlt_properties_get_int( producer_props, "cache" );
++	mlt_properties cache = mlt_properties_get_data( producer_props, "_cache", NULL );
++	int update_cache = 0;
++
+ 	// Get the time to live for each frame
+ 	double ttl = mlt_properties_get_int( producer_props, "ttl" );
+ 
+@@ -109,24 +113,61 @@
+ 	// Image index
+ 	int image_idx = ( int )floor( ( double )position / ttl ) % this->count;
+ 
++	// Key for the cache
++	char image_key[ 10 ];
++	sprintf( image_key, "%d", image_idx );
++
+ 	pthread_mutex_lock( &fastmutex );
+ 
++	// Check if the frame is already loaded
++	if ( use_cache )
++	{
++		if ( cache == NULL )
++		{
++			cache = mlt_properties_new( );
++			mlt_properties_set_data( producer_props, "_cache", cache, 0, ( mlt_destructor )mlt_properties_close, NULL );
++		}
++
++		mlt_frame cached = mlt_properties_get_data( cache, image_key, NULL );
++
++		if ( cached )
++		{
++			this->image_idx = image_idx;
++			mlt_properties cached_props = MLT_FRAME_PROPERTIES( cached );
++			this->width = mlt_properties_get_int( cached_props, "width" );
++			this->height = mlt_properties_get_int( cached_props, "height" );
++			mlt_properties_set_int( producer_props, "_real_width", mlt_properties_get_int( cached_props, "real_width" ) );
++			mlt_properties_set_int( producer_props, "_real_height", mlt_properties_get_int( cached_props, "real_height" ) );
++			this->image = mlt_properties_get_data( cached_props, "image", NULL );
++			this->alpha = mlt_properties_get_data( cached_props, "alpha", NULL );
++
++			if ( width != 0 && ( width != this->width || height != this->height ) )
++				this->image = NULL;
++		}
++	}
++
+     // optimization for subsequent iterations on single picture
+ 	if ( width != 0 && this->image != NULL && image_idx == this->image_idx )
+ 	{
+ 		if ( width != this->width || height != this->height )
+ 		{
+ 			pixbuf = mlt_properties_get_data( producer_props, "_pixbuf", NULL );
++			if ( !use_cache )
++			{
+ 			mlt_pool_release( this->image );
+ 			mlt_pool_release( this->alpha );
++			}
+ 			this->image = NULL;
+ 			this->alpha = NULL;
+ 		}
+ 	}
+ 	else if ( pixbuf == NULL && ( this->image == NULL || image_idx != this->image_idx ) )
+ 	{
++		if ( !use_cache )
++		{
+ 		mlt_pool_release( this->image );
+ 		mlt_pool_release( this->alpha );
++		}
+ 		this->image = NULL;
+ 		this->alpha = NULL;
+ 
+@@ -197,6 +238,9 @@
+ 
+ 		// Finished with pixbuf now
+ 		g_object_unref( pixbuf );
++
++		// Ensure we update the cache when we need to
++		update_cache = use_cache;
+ 	}
+ 
+ 	// Set width/height of frame
+@@ -209,6 +253,19 @@
+ 	mlt_properties_set_data( properties, "image", this->image, this->width * ( this->height + 1 ) * 2, NULL, NULL );
+ 	mlt_properties_set_data( properties, "alpha", this->alpha, this->width * this->height, NULL, NULL );
+ 
++	if ( update_cache )
++	{
++		mlt_frame cached = mlt_frame_init( );
++		mlt_properties cached_props = MLT_FRAME_PROPERTIES( cached );
++		mlt_properties_set_int( cached_props, "width", this->width );
++		mlt_properties_set_int( cached_props, "height", this->height );
++		mlt_properties_set_int( cached_props, "real_width", mlt_properties_get_int( producer_props, "_real_width" ) );
++		mlt_properties_set_int( cached_props, "real_height", mlt_properties_get_int( producer_props, "_real_height" ) );
++		mlt_properties_set_data( cached_props, "image", this->image, this->width * ( this->height + 1 ) * 2, mlt_pool_release, NULL );
++		mlt_properties_set_data( cached_props, "alpha", this->alpha, this->width * this->height, mlt_pool_release, NULL );
++		mlt_properties_set_data( cache, image_key, cached, 0, ( mlt_destructor )mlt_frame_close, NULL );
++	}
++
+ 	pthread_mutex_unlock( &fastmutex );
+ }
+ 
+@@ -242,9 +299,6 @@
+ 	// The fault is not in the design of mlt, but in the implementation of the pixbuf producer...
+ 	if ( *buffer != NULL )
+ 	{
+-
+-		if ( *format == mlt_image_yuv422 || *format == mlt_image_yuv420p )
+-		{
+ 			// Clone the image and the alpha
+ 			uint8_t *image_copy = mlt_pool_alloc( image_size );
+ 			uint8_t *alpha_copy = mlt_pool_alloc( alpha_size );
+@@ -264,24 +318,6 @@
+ 			// We're going to pass the copy on
+ 			*buffer = image_copy;
+ 		}
+-		else if ( *format == mlt_image_rgb24a )
+-		{
+-			// Clone the image and the alpha
+-			image_size = *width * ( *height + 1 ) * 4;
+-			alpha_size = *width * ( *height + 1 );
+-			uint8_t *image_copy = mlt_pool_alloc( image_size );
+-			uint8_t *alpha_copy = mlt_pool_alloc( alpha_size );
+-
+-			mlt_convert_yuv422_to_rgb24a(*buffer, image_copy, (*width)*(*height));
+-
+-			// Now update properties so we free the copy after
+-			mlt_properties_set_data( properties, "image", image_copy, image_size, mlt_pool_release, NULL );
+-			mlt_properties_set_data( properties, "alpha", alpha_copy, alpha_size, mlt_pool_release, NULL );
+-
+-			// We're going to pass the copy on
+-			*buffer = image_copy;
+-		}
+-	}
+ 	else
+ 	{
+ 		// TODO: Review all cases of invalid images
+@@ -294,7 +330,6 @@
+ 	return 0;
+ }
+ 
+-
+ static uint8_t *producer_get_alpha_mask( mlt_frame this )
+ {
+ 	// Obtain properties of frame
+@@ -432,8 +467,11 @@
+ static void producer_close( mlt_producer parent )
+ {
+ 	producer_pixbuf this = parent->child;
++	if ( !mlt_properties_get_int( MLT_PRODUCER_PROPERTIES( parent ), "cache" ) )
++	{
+ 	mlt_pool_release( this->image );
+ 	mlt_pool_release( this->alpha );
++	}
+ 	parent->close = NULL;
+ 	mlt_producer_close( parent );
+ 	mlt_properties_close( this->filenames );
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/motion_est/filter_motion_est.c mlt/src/modules/motion_est/filter_motion_est.c
+--- mlt-0.2.2/src/modules/motion_est/filter_motion_est.c	2007-03-11 12:41:03.000000000 +0100
++++ mlt/src/modules/motion_est/filter_motion_est.c	2006-09-28 03:03:15.000000000 +0200
+@@ -160,7 +160,7 @@
+ /** /brief Reference Sum of Absolute Differences comparison function
+ *
+ */
+-inline static int sad_reference( uint8_t *block1, uint8_t *block2, const int xstride, const int ystride, const int w, const int h )
++static int sad_reference( uint8_t *block1, uint8_t *block2, const int xstride, const int ystride, const int w, const int h )
+ {
+ 	int i, j, score = 0;
+ 	for ( j = 0; j < h; j++ ){
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/motion_est/sad_sse.h mlt/src/modules/motion_est/sad_sse.h
+--- mlt-0.2.2/src/modules/motion_est/sad_sse.h	2005-07-09 01:37:42.000000000 +0200
++++ mlt/src/modules/motion_est/sad_sse.h	2006-09-28 03:04:24.000000000 +0200
+@@ -41,7 +41,7 @@
+ 	SAD_SSE_INIT
+ 	#define ROW	SAD_SSE_SUM_8(0) SAD_SSE_NEXTROW
+ 	asm volatile (  ROW ROW ROW ROW
+-			:: "r" (block1), "r" (block2), "r" (ystride));
++			:: "r" (block1), "r" (block2), "r" ((long int)(ystride)));
+ 	
+ 	SAD_SSE_FINISH(result)
+ 	return result;
+@@ -55,7 +55,7 @@
+ 	SAD_SSE_INIT
+ 	#define ROW	SAD_SSE_SUM_8(0) SAD_SSE_NEXTROW
+ 	asm volatile (  ROW ROW ROW ROW ROW ROW ROW ROW
+-			:: "r" (block1), "r" (block2), "r" (ystride));
++			:: "r" (block1), "r" (block2), "r" ((long int)(ystride)));
+ 	
+ 	SAD_SSE_FINISH(result)
+ 	return result;
+@@ -70,7 +70,7 @@
+ 	#define ROW	SAD_SSE_SUM_8(0) SAD_SSE_SUM_8(8) SAD_SSE_NEXTROW
+ 	asm volatile (	ROW ROW ROW ROW ROW ROW ROW ROW
+ 			ROW ROW ROW ROW ROW ROW ROW ROW
+-			:: "r" (block1), "r" (block2), "r" (ystride));
++			:: "r" (block1), "r" (block2), "r" ((long int)(ystride)));
+ 	
+ 	SAD_SSE_FINISH(result)
+ 	return result;
+@@ -89,7 +89,7 @@
+ 			ROW ROW ROW ROW ROW ROW ROW ROW
+ 			ROW ROW ROW ROW ROW ROW ROW ROW
+ 			ROW ROW ROW ROW ROW ROW ROW ROW
+-			:: "r" (block1), "r" (block2), "r" (ystride));
++			:: "r" (block1), "r" (block2), "r" ((long int)(ystride)));
+ 	
+ 	SAD_SSE_FINISH(result)
+ 	return result;
+@@ -219,8 +219,8 @@
+ static __attribute__((used)) __attribute__((aligned(8))) uint64_t sad_sse_422_mask_chroma = 0x00ff00ff00ff00ffULL;
+ 
+ #define SAD_SSE_422_LUMA_INIT \
+-	asm volatile (  "movq sad_sse_422_mask_chroma,%%mm7\n\t"\
+-			"pxor %%mm6,%%mm6\n\t" ::  );\
++	asm volatile (  "movq %0,%%mm7\n\t"\
++			"pxor %%mm6,%%mm6\n\t" :: "m" (sad_sse_422_mask_chroma) );\
+ 
+ // Sum two 4x1 pixel blocks
+ #define SAD_SSE_422_LUMA_SUM_4(OFFSET) \
+@@ -231,13 +231,13 @@
+ 			"psadbw %%mm1,%%mm0			\n\t"\
+ 			"paddw %%mm0,%%mm6			\n\t"\
+ 
+-inline static int sad_sse_422_luma_4x4( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
++static int sad_sse_422_luma_4x4( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
+ {
+ 	int result; 
+ 	SAD_SSE_422_LUMA_INIT
+ 	#define ROW	SAD_SSE_422_LUMA_SUM_4(0) SAD_SSE_NEXTROW
+ 	asm volatile (  ROW ROW ROW ROW
+-			:: "r" (block1), "r" (block2), "r" (ystride));
++			:: "r" (block1), "r" (block2), "r" ((long int)(ystride)));
+ 	
+ 	SAD_SSE_FINISH(result)
+ 	return result;
+@@ -245,13 +245,13 @@
+ 
+ }
+ 
+-inline static int sad_sse_422_luma_8x8( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
++static int sad_sse_422_luma_8x8( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
+ {
+ 	int result; 
+ 	SAD_SSE_422_LUMA_INIT
+ 	#define ROW	SAD_SSE_422_LUMA_SUM_4(0) SAD_SSE_422_LUMA_SUM_4(8) SAD_SSE_NEXTROW
+ 	asm volatile (  ROW ROW ROW ROW ROW ROW ROW ROW
+-			:: "r" (block1), "r" (block2), "r" (ystride));
++			:: "r" (block1), "r" (block2), "r" ((long int)(ystride)));
+ 	
+ 	SAD_SSE_FINISH(result)
+ 	return result;
+@@ -259,14 +259,14 @@
+ 
+ }
+ 
+-inline static int sad_sse_422_luma_16x16( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
++static int sad_sse_422_luma_16x16( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
+ {
+ 	int result; 
+ 	SAD_SSE_422_LUMA_INIT
+ 	#define ROW	SAD_SSE_422_LUMA_SUM_4(0) SAD_SSE_422_LUMA_SUM_4(8) SAD_SSE_422_LUMA_SUM_4(16) SAD_SSE_422_LUMA_SUM_4(24) SAD_SSE_NEXTROW
+ 	asm volatile (	ROW ROW ROW ROW ROW ROW ROW ROW
+ 			ROW ROW ROW ROW ROW ROW ROW ROW
+-			:: "r" (block1), "r" (block2), "r" (ystride));
++			:: "r" (block1), "r" (block2), "r" ((long int)(ystride)));
+ 	
+ 	SAD_SSE_FINISH(result)
+ 	return result;
+@@ -274,7 +274,7 @@
+ 
+ }
+ 
+-inline static int sad_sse_422_luma_32x32( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
++static int sad_sse_422_luma_32x32( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
+ {
+ 	int result; 
+ 	SAD_SSE_422_LUMA_INIT
+@@ -286,7 +286,7 @@
+ 			ROW ROW ROW ROW ROW ROW ROW ROW
+ 			ROW ROW ROW ROW ROW ROW ROW ROW
+ 			ROW ROW ROW ROW ROW ROW ROW ROW
+-			:: "r" (block1), "r" (block2), "r" (ystride));
++			:: "r" (block1), "r" (block2), "r" ((long int)(ystride)));
+ 	
+ 	SAD_SSE_FINISH(result)
+ 	return result;
+@@ -294,7 +294,7 @@
+ 
+ }
+ 
+-inline static int sad_sse_422_luma_4w( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
++static int sad_sse_422_luma_4w( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
+ {
+ 	int result; 
+ 
+@@ -315,7 +315,7 @@
+ 
+ }
+ 
+-inline static int sad_sse_422_luma_8w( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
++static int sad_sse_422_luma_8w( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
+ {
+ 	int result; 
+ 
+@@ -338,7 +338,7 @@
+ 
+ }
+ 
+-inline static int sad_sse_422_luma_16w( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
++static int sad_sse_422_luma_16w( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
+ {
+ 	int result; 
+ 
+@@ -363,7 +363,7 @@
+ 
+ }
+ 
+-inline static int sad_sse_422_luma_32w( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
++static int sad_sse_422_luma_32w( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
+ {
+ 	int result; 
+ 
+@@ -392,7 +392,7 @@
+ 
+ }
+ 
+-inline static int sad_sse_422_luma_64w( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
++static int sad_sse_422_luma_64w( uint8_t *block1, uint8_t *block2, int xstride, int ystride, int w, int h )
+ {
+ 	int result; 
+ 
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/qimage/qimage_wrapper.cpp mlt/src/modules/qimage/qimage_wrapper.cpp
+--- mlt-0.2.2/src/modules/qimage/qimage_wrapper.cpp	2006-04-12 09:55:39.000000000 +0200
++++ mlt/src/modules/qimage/qimage_wrapper.cpp	2006-08-14 11:25:38.000000000 +0200
+@@ -47,9 +47,11 @@
+ 
+ static void assign_buffered_image( mlt_properties producer_props, uint8_t *current_image, uint8_t *current_alpha, int width, int height )
+ {
++	int use_cache = mlt_properties_get_int( producer_props, "cache" );
++	mlt_destructor destructor = use_cache ? NULL : mlt_pool_release;
+ 	mlt_events_block( producer_props, NULL );
+-	mlt_properties_set_data( producer_props, "_qimage_image", current_image, 0, mlt_pool_release, NULL );
+-	mlt_properties_set_data( producer_props, "_qimage_alpha", current_alpha, 0, mlt_pool_release, NULL );
++	mlt_properties_set_data( producer_props, "_qimage_image", current_image, 0, destructor, NULL );
++	mlt_properties_set_data( producer_props, "_qimage_alpha", current_alpha, 0, destructor, NULL );
+ 	mlt_properties_set_int( producer_props, "_qimage_width", width );
+ 	mlt_properties_set_int( producer_props, "_qimage_height", height );
+ 	mlt_events_unblock( producer_props, NULL );
+@@ -72,6 +74,11 @@
+ 	// Obtain properties of producer
+ 	mlt_properties producer_props = MLT_PRODUCER_PROPERTIES( producer );
+ 
++	// Obtain the cache flag and structure
++	int use_cache = mlt_properties_get_int( producer_props, "cache" );
++	mlt_properties cache = ( mlt_properties )mlt_properties_get_data( producer_props, "_cache", NULL );
++	int update_cache = 0;
++
+ 	// Retrieve current info if available
+ 	uint8_t *current_image = ( uint8_t * )mlt_properties_get_data( producer_props, "_qimage_image", NULL );
+ 	uint8_t *current_alpha = ( uint8_t * )mlt_properties_get_data( producer_props, "_qimage_alpha", NULL );
+@@ -87,6 +94,39 @@
+ 	// Image index
+ 	int image_idx = ( int )floor( ( double )position / ttl ) % self->count;
+ 
++	// Key for the cache
++	char image_key[ 10 ];
++	sprintf( image_key, "%d", image_idx );
++
++	// Check if the frame is already loaded
++	if ( use_cache )
++	{
++		if ( cache == NULL )
++		{
++			cache = mlt_properties_new( );
++			mlt_properties_set_data( producer_props, "_cache", cache, 0, ( mlt_destructor )mlt_properties_close, NULL );
++		}
++
++		mlt_frame cached = ( mlt_frame )mlt_properties_get_data( cache, image_key, NULL );
++
++		if ( cached )
++		{
++			self->image_idx = image_idx;
++			mlt_properties cached_props = MLT_FRAME_PROPERTIES( cached );
++			current_width = mlt_properties_get_int( cached_props, "width" );
++			current_height = mlt_properties_get_int( cached_props, "height" );
++			mlt_properties_set_int( producer_props, "_real_width", mlt_properties_get_int( cached_props, "real_width" ) );
++			mlt_properties_set_int( producer_props, "_real_height", mlt_properties_get_int( cached_props, "real_height" ) );
++			current_image = ( uint8_t * )mlt_properties_get_data( cached_props, "image", NULL );
++			current_alpha = ( uint8_t * )mlt_properties_get_data( cached_props, "alpha", NULL );
++
++			if ( width != 0 && ( width != current_width || height != current_height ) )
++				current_image = NULL;
++
++			assign_buffered_image( producer_props, current_image, current_alpha, current_width, current_height );
++		}
++	}
++
+     // optimization for subsequent iterations on single picture
+ 	if ( width != 0 && current_image != NULL && image_idx == self->image_idx )
+ 	{
+@@ -159,6 +199,9 @@
+ 			mlt_convert_bgr24a_to_yuv422( temp.bits( ), current_width, current_height, temp.bytesPerLine( ), current_image, current_alpha );
+ 
+ 		assign_buffered_image( producer_props, current_image, current_alpha, current_width, current_height );
++
++		// Ensure we update the cache when we need to
++		update_cache = use_cache;
+ 	}
+ 
+ 	// Set width/height of frame
+@@ -170,6 +213,19 @@
+ 	// pass the image data without destructor
+ 	mlt_properties_set_data( properties, "image", current_image, current_width * ( current_height + 1 ) * 2, NULL, NULL );
+ 	mlt_properties_set_data( properties, "alpha", current_alpha, current_width * current_height, NULL, NULL );
++
++	if ( update_cache )
++	{
++		mlt_frame cached = mlt_frame_init( );
++		mlt_properties cached_props = MLT_FRAME_PROPERTIES( cached );
++		mlt_properties_set_int( cached_props, "width", current_width );
++		mlt_properties_set_int( cached_props, "height", current_height );
++		mlt_properties_set_int( cached_props, "real_width", mlt_properties_get_int( producer_props, "_real_width" ) );
++		mlt_properties_set_int( cached_props, "real_height", mlt_properties_get_int( producer_props, "_real_height" ) );
++		mlt_properties_set_data( cached_props, "image", current_image, current_width * ( current_height + 1 ) * 2, mlt_pool_release, NULL );
++		mlt_properties_set_data( cached_props, "alpha", current_alpha, current_width * current_height, mlt_pool_release, NULL );
++		mlt_properties_set_data( cache, image_key, cached, 0, ( mlt_destructor )mlt_frame_close, NULL );
++	}
+ }
+ 
+ }
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/sdl/Makefile mlt/src/modules/sdl/Makefile
+--- mlt-0.2.2/src/modules/sdl/Makefile	2005-12-05 12:35:54.000000000 +0100
++++ mlt/src/modules/sdl/Makefile	2006-09-25 22:07:46.000000000 +0200
+@@ -12,6 +12,8 @@
+ ifeq ($(targetos),Darwin)
+ 	CFLAGS +=-ObjC
+ 	LDFLAGS +=-lobjc -framework Foundation
++else
++	LDFLAGS +=-lX11
+ endif
+ 
+ CFLAGS +=-I../.. `sdl-config --cflags`
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/sdl/consumer_sdl_preview.c mlt/src/modules/sdl/consumer_sdl_preview.c
+--- mlt-0.2.2/src/modules/sdl/consumer_sdl_preview.c	2005-09-07 11:23:37.000000000 +0200
++++ mlt/src/modules/sdl/consumer_sdl_preview.c	2007-03-03 00:21:07.000000000 +0100
+@@ -142,6 +142,9 @@
+ 
+ 		char *window_id = mlt_properties_get( properties, "window_id" );
+ 		char *audio_driver = mlt_properties_get( properties, "audio_driver" );
++		char *video_driver = mlt_properties_get( properties, "video_driver" );
++		char *audio_device = mlt_properties_get( properties, "audio_device" );
++		char *output_display = mlt_properties_get( properties, "output_display" );
+ 		int progressive = mlt_properties_get_int( properties, "progressive" ) | mlt_properties_get_int( properties, "deinterlace" );
+ 
+ 		consumer_stop( parent );
+@@ -150,12 +153,21 @@
+ 		this->joined = 0;
+ 		this->last_speed = 1;
+ 
++		if ( output_display != NULL )
++			setenv( "DISPLAY", output_display, 1 );
++
+ 		if ( window_id != NULL )
+ 			setenv( "SDL_WINDOWID", window_id, 1 );
+ 
++		if ( video_driver != NULL )
++			setenv( "SDL_VIDEODRIVER", video_driver, 1 );
++
+ 		if ( audio_driver != NULL )
+ 			setenv( "SDL_AUDIODRIVER", audio_driver, 1 );
+ 
++		if ( audio_device != NULL )
++			setenv( "AUDIODEV", audio_device, 1 );
++
+ 		if ( SDL_Init( SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE ) < 0 )
+ 		{
+ 			fprintf( stderr, "Failed to initialize SDL: %s\n", SDL_GetError() );
+@@ -174,7 +186,7 @@
+ 		mlt_properties_set_int( play, "progressive", progressive );
+ 		mlt_properties_set_int( still, "progressive", progressive );
+ 
+-		mlt_properties_pass_list( play, properties, "resize,rescale,width,height,aspect_ratio,display_ratio" );
++		mlt_properties_pass_list( play, properties, "resize,rescale,width,height,aspect_ratio,display_ratio,volume" );
+ 		mlt_properties_pass_list( still, properties, "resize,rescale,width,height,aspect_ratio,display_ratio" );
+ 		mlt_properties_pass_list( play, properties, "deinterlace_method" );
+ 		mlt_properties_pass_list( still, properties, "deinterlace_method" );
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/vmfx/Makefile mlt/src/modules/vmfx/Makefile
+--- mlt-0.2.2/src/modules/vmfx/Makefile	2005-12-05 12:35:55.000000000 +0100
++++ mlt/src/modules/vmfx/Makefile	2006-08-14 11:32:53.000000000 +0200
+@@ -5,6 +5,7 @@
+ OBJS = factory.o \
+ 	   filter_chroma.o \
+ 	   filter_chroma_hold.o \
++	   filter_mono.o \
+ 	   filter_shape.o \
+ 	   producer_pgm.o
+ 
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/vmfx/configure mlt/src/modules/vmfx/configure
+--- mlt-0.2.2/src/modules/vmfx/configure	2005-09-01 09:08:50.000000000 +0200
++++ mlt/src/modules/vmfx/configure	2006-08-14 11:32:53.000000000 +0200
+@@ -10,6 +10,7 @@
+ cat << EOF >> ../filters.dat
+ chroma			libmltvmfx$LIBSUF
+ chroma_hold		libmltvmfx$LIBSUF
++mono			libmltvmfx$LIBSUF
+ shape			libmltvmfx$LIBSUF
+ EOF
+ 
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/vmfx/factory.c mlt/src/modules/vmfx/factory.c
+--- mlt-0.2.2/src/modules/vmfx/factory.c	2005-09-01 09:08:50.000000000 +0200
++++ mlt/src/modules/vmfx/factory.c	2006-08-14 11:32:53.000000000 +0200
+@@ -22,6 +22,7 @@
+ 
+ #include "filter_chroma.h"
+ #include "filter_chroma_hold.h"
++#include "filter_mono.h"
+ #include "filter_shape.h"
+ #include "producer_pgm.h"
+ 
+@@ -38,6 +39,8 @@
+ 		return filter_chroma_init( arg );
+ 	if ( !strcmp( id, "chroma_hold" ) )
+ 		return filter_chroma_hold_init( arg );
++	if ( !strcmp( id, "mono" ) )
++		return filter_mono_init( arg );
+ 	if ( !strcmp( id, "shape" ) )
+ 		return filter_shape_init( arg );
+ 	return NULL;
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/vmfx/filter_chroma.c mlt/src/modules/vmfx/filter_chroma.c
+--- mlt-0.2.2/src/modules/vmfx/filter_chroma.c	2005-09-01 09:08:50.000000000 +0200
++++ mlt/src/modules/vmfx/filter_chroma.c	2006-08-14 11:30:48.000000000 +0200
+@@ -20,6 +20,7 @@
+ 
+ #include "filter_chroma.h"
+ #include <stdlib.h>
++#include <math.h>
+ #include <framework/mlt_factory.h>
+ #include <framework/mlt_frame.h>
+ #include <framework/mlt_producer.h>
+@@ -30,9 +31,12 @@
+ 	return ( ( int )v >= c - var ) && ( ( int )v <= c + var );
+ }
+ 
+-static inline uint8_t alpha_value( uint8_t a, uint8_t *p, uint8_t u, uint8_t v, int var )
++static inline uint8_t alpha_value( uint8_t a, uint8_t *p, uint8_t u, uint8_t v, int var, int odd )
+ {
++	if ( odd == 0 )
+ 	return ( in_range( *( p + 1 ), u, var ) && in_range( *( p + 3 ), v, var ) ) ? 0 : a;
++	else
++		return ( in_range( ( *( p + 1 ) + *( p + 5 ) ) / 2, u, var ) && in_range( ( *( p + 3 ) + *( p + 7 ) ) / 2, v, var ) ) ? 0 : a;
+ }
+ 
+ /** Get the images and map the chroma to the alpha of the frame.
+@@ -58,12 +62,11 @@
+ 		int size = *width * *height / 2;
+ 		while ( size -- )
+ 		{
+-			*alpha = alpha_value( *alpha, p, u, v, variance );
++			*alpha = alpha_value( *alpha, p, u, v, variance, 0 );
+ 			*alpha ++;
+-			p += 2;
+-			*alpha = alpha_value( *alpha, p, v, u, variance );
++			*alpha = alpha_value( *alpha, p, u, v, variance, 1 );
+ 			alpha ++;
+-			p += 2;
++			p += 4;
+ 		}
+ 	}
+ 
+@@ -88,8 +91,8 @@
+ 	mlt_filter this = mlt_filter_new( );
+ 	if ( this != NULL )
+ 	{
+-		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "key", arg == NULL ? "0x00ff00" : arg );
+-		mlt_properties_set_double( MLT_FILTER_PROPERTIES( this ), "variance", 0.3 );
++		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "key", arg == NULL ? "0x0000ff" : arg );
++		mlt_properties_set_double( MLT_FILTER_PROPERTIES( this ), "variance", 0.15 );
+ 		this->process = filter_process;
+ 	}
+ 	return this;
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/vmfx/filter_chroma_hold.c mlt/src/modules/vmfx/filter_chroma_hold.c
+--- mlt-0.2.2/src/modules/vmfx/filter_chroma_hold.c	2005-09-01 09:08:50.000000000 +0200
++++ mlt/src/modules/vmfx/filter_chroma_hold.c	2006-08-14 11:31:14.000000000 +0200
+@@ -30,9 +30,12 @@
+ 	return ( ( int )v >= c - var ) && ( ( int )v <= c + var );
+ }
+ 
+-static inline uint8_t alpha_value( uint8_t a, uint8_t *p, uint8_t u, uint8_t v, int var )
++static inline uint8_t alpha_value( uint8_t a, uint8_t *p, uint8_t u, uint8_t v, int var, int odd )
+ {
++	if ( odd == 0 )
+ 	return ( in_range( *( p + 1 ), u, var ) && in_range( *( p + 3 ), v, var ) ) ? 0 : a;
++	else
++		return ( in_range( ( *( p + 1 ) + *( p + 5 ) ) / 2, u, var ) && in_range( ( *( p + 3 ) + *( p + 7 ) ) / 2, v, var ) ) ? 0 : a;
+ }
+ 
+ /** Get the images and map the chroma to the alpha of the frame.
+@@ -58,18 +61,13 @@
+ 		int size = *width * *height / 2;
+ 		while ( size -- )
+ 		{
+-			alpha = alpha_value( 255, p, u, v, variance );
+-			p ++;
++			alpha = alpha_value( 255, p, u, v, variance, 0 );
+ 			if ( alpha ) 
+-				*p ++ = 128;
+-			else
+-				p ++;
+-			alpha = alpha_value( 255, p, v, u, variance );
+-			p ++;
++				*( p + 1 )= 128;
++			alpha = alpha_value( 255, p, u, v, variance, 1 );
+ 			if ( alpha ) 
+-				*p ++ = 128;
+-			else
+-				p ++;
++				*( p + 3 ) = 128;
++			p += 4;
+ 		}
+ 	}
+ 
+@@ -95,7 +93,7 @@
+ 	if ( this != NULL )
+ 	{
+ 		mlt_properties_set( MLT_FILTER_PROPERTIES( this ), "key", arg == NULL ? "0xc00000" : arg );
+-		mlt_properties_set_double( MLT_FILTER_PROPERTIES( this ), "variance", 0.3 );
++		mlt_properties_set_double( MLT_FILTER_PROPERTIES( this ), "variance", 0.15 );
+ 		this->process = filter_process;
+ 	}
+ 	return this;
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/vmfx/filter_mono.c mlt/src/modules/vmfx/filter_mono.c
+--- mlt-0.2.2/src/modules/vmfx/filter_mono.c	1970-01-01 01:00:00.000000000 +0100
++++ mlt/src/modules/vmfx/filter_mono.c	2006-08-14 11:32:53.000000000 +0200
+@@ -0,0 +1,97 @@
++/*
++ * filter_mono.c -- Arbitrary alpha channel shaping
++ * Copyright (C) 2005 Visual Media Fx Inc.
++ * Author: Charles Yates <charles.yates@pandora.be>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ */
++
++#include "filter_mono.h"
++#include <string.h>
++#include <framework/mlt_factory.h>
++#include <framework/mlt_frame.h>
++#include <framework/mlt_producer.h>
++#include <framework/mlt_geometry.h>
++
++/** Get the images and apply the luminance of the mask to the alpha of the frame.
++*/
++
++static int filter_get_image( mlt_frame this, uint8_t **image, mlt_image_format *format, int *width, int *height, int writable )
++{
++	int use_alpha = mlt_deque_pop_back_int( MLT_FRAME_IMAGE_STACK( this ) );
++	int midpoint = mlt_deque_pop_back_int( MLT_FRAME_IMAGE_STACK( this ) );
++
++	// Render the frame
++	if ( mlt_frame_get_image( this, image, format, width, height, writable ) == 0 )
++	{
++		uint8_t *p = *image;
++		int size = *width * *height;
++
++		if ( !use_alpha )
++		{
++			while( size -- )
++			{
++				if ( *p >= midpoint )
++					*p ++ = 16;
++				else
++					*p ++ = 235;
++				*p ++ = 128;
++			}
++		}
++		else
++		{
++			uint8_t *alpha = mlt_frame_get_alpha_mask( this );
++			while( size -- )
++			{
++				if ( *alpha ++ < midpoint )
++					*p ++ = 16;
++				else
++					*p ++ = 235;
++				*p ++ = 128;
++			}
++		}
++	}
++
++	return 0;
++}
++
++/** Filter processing.
++*/
++
++static mlt_frame filter_process( mlt_filter this, mlt_frame frame )
++{
++	int midpoint = mlt_properties_get_int( MLT_FILTER_PROPERTIES( this ), "midpoint" );
++	int use_alpha = mlt_properties_get_int( MLT_FILTER_PROPERTIES( this ), "use_alpha" );
++	mlt_deque_push_back_int( MLT_FRAME_IMAGE_STACK( frame ), midpoint );
++	mlt_deque_push_back_int( MLT_FRAME_IMAGE_STACK( frame ), use_alpha );
++	mlt_frame_push_get_image( frame, filter_get_image );
++	return frame;
++}
++
++/** Constructor for the filter.
++*/
++
++mlt_filter filter_mono_init( char *arg )
++{
++	mlt_filter this = mlt_filter_new( );
++	if ( this != NULL )
++	{
++		mlt_properties_set_int( MLT_FILTER_PROPERTIES( this ), "midpoint", 128 );
++		mlt_properties_set_int( MLT_FILTER_PROPERTIES( this ), "use_alpha", 0 );
++		this->process = filter_process;
++	}
++	return this;
++}
++
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/vmfx/filter_mono.h mlt/src/modules/vmfx/filter_mono.h
+--- mlt-0.2.2/src/modules/vmfx/filter_mono.h	1970-01-01 01:00:00.000000000 +0100
++++ mlt/src/modules/vmfx/filter_mono.h	2006-08-14 11:56:04.000000000 +0200
+@@ -0,0 +1,28 @@
++/*
++ * filter_shape.h -- Arbitrary alpha channel shaping
++ * Copyright (C) 2005 Visual Media Fx Inc.
++ * Author: Charles Yates <charles.yates@gmail.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU Lesser General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ */
++
++#ifndef _FILTER_MONO_H_
++#define _FILTER_MONO_H_
++
++#include <framework/mlt_filter.h>
++
++extern mlt_filter filter_mono_init( char *arg );
++
++#endif
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/vorbis/producer_vorbis.c mlt/src/modules/vorbis/producer_vorbis.c
+--- mlt-0.2.2/src/modules/vorbis/producer_vorbis.c	2005-07-12 16:45:06.000000000 +0200
++++ mlt/src/modules/vorbis/producer_vorbis.c	2006-12-31 17:06:35.000000000 +0100
+@@ -36,6 +36,35 @@
+ static int producer_open( mlt_producer this, char *file );
+ static int producer_get_frame( mlt_producer this, mlt_frame_ptr frame, int index );
+ 
++/** Structure for metadata reading 
++*/
++
++typedef struct _sw_metadata sw_metadata;
++
++struct _sw_metadata {
++	char * name;
++	char * content;
++};
++
++static sw_metadata *vorbis_metadata_from_str (char * str)
++{
++	sw_metadata * meta = NULL;
++	int i;
++
++	for (i = 0; str[i]; i++) {
++		str[i] = tolower(str[i]);
++		if (str[i] == '=') {
++			str[i] = '\0';
++			meta = malloc (sizeof (sw_metadata));
++			meta->name = malloc( strlen(str) + 18 );
++			sprintf(meta->name, "meta.attr.%s.markup", str);
++			meta->content = strdup (&str[i+1]);
++			break;
++		}
++	}
++ 	return meta;
++}
++
+ /** Constructor for libvorbis.
+ */
+ 
+@@ -118,6 +147,16 @@
+ 			// Assign the ov structure
+ 			mlt_properties_set_data( properties, "ogg_vorbis_file", ov, 0, producer_file_close, NULL );
+ 
++			// Read metadata
++			sw_metadata * metadata = NULL;
++			char **ptr = ov_comment(ov, -1)->user_comments;
++			while(*ptr) {
++				metadata = vorbis_metadata_from_str (*ptr);
++				if (metadata != NULL)
++					mlt_properties_set(properties, metadata->name, metadata->content);
++				++ptr;
++			}
++
+ 			if ( ov_seekable( ov ) )
+ 			{
+ 				// Get the length of the file
+@@ -129,6 +168,11 @@
+ 				// Set out and length of file
+ 				mlt_properties_set_position( properties, "out", ( length * fps ) - 1 );
+ 				mlt_properties_set_position( properties, "length", ( length * fps ) );
++
++				// Get the vorbis info
++				vorbis_info *vi = ov_info( ov, -1 );
++				mlt_properties_set_int( properties, "frequency", (int) vi->rate );
++				mlt_properties_set_int( properties, "channels", vi->channels );
+ 			}
+ 		}
+ 		else
+@@ -310,12 +354,16 @@
+ 	mlt_frame_set_position( *frame, mlt_producer_position( this ) );
+ 
+ 	// Set the position of this producer
+-	mlt_properties_set_position( MLT_FRAME_PROPERTIES( *frame ), "vorbis_position", mlt_producer_frame( this ) );
++	mlt_properties frame_properties = MLT_FRAME_PROPERTIES( *frame );
++	mlt_properties_set_position( frame_properties, "vorbis_position", mlt_producer_frame( this ) );
+ 
+ 	// Set up the audio
+ 	mlt_frame_push_audio( *frame, this );
+ 	mlt_frame_push_audio( *frame, producer_get_audio );
+ 
++	// Pass audio properties to the frame
++	mlt_properties_pass_list( frame_properties, MLT_PRODUCER_PROPERTIES( this ), "frequency, channels" );
++
+ 	// Calculate the next timecode
+ 	mlt_producer_prepare_next( this );
+ 
+diff -w -uNr --exclude=CVS mlt-0.2.2/src/modules/westley/producer_westley.c mlt/src/modules/westley/producer_westley.c
+--- mlt-0.2.2/src/modules/westley/producer_westley.c	2005-09-23 08:45:24.000000000 +0200
++++ mlt/src/modules/westley/producer_westley.c	2006-08-09 08:55:47.000000000 +0200
+@@ -433,6 +433,44 @@
+ 		mlt_properties_set( properties, (char*) atts[0], atts[1] == NULL ? "" : (char*) atts[1] );
+ }
+ 
++// Parse a SMIL clock value (as produced by Kino 0.9.1) and return position in frames
++static mlt_position parse_clock_value( char *value, double fps )
++{
++	// This implementation expects a fully specified clock value - no optional
++	// parts (e.g. 1:05)
++	char *pos, *copy = strdup( value );
++	int hh, mm, ss, ms;
++	mlt_position result = -1;
++
++	value = copy;
++	pos = strchr( value, ':' );
++	if ( !pos )
++		return result;
++	*pos = '\0';
++	hh = atoi( value );
++	value = pos + 1;
++
++	pos = strchr( value, ':' );
++	if ( !pos )
++		return result;
++	*pos = '\0';
++	mm = atoi( value );
++	value = pos + 1;
++	
++	pos = strchr( value, '.' );
++	if ( !pos )
++		return result;
++	*pos = '\0';
++	ss = atoi( value );
++	value = pos + 1;
++	
++	ms = atoi( value );
++	free( copy );
++	result = ( fps * ( ( (hh * 3600) + (mm * 60) + ss ) * 1000  + ms ) / 1000 + 0.5 );
++	
++	return result;
++}
++
+ static void on_end_producer( deserialise_context context, const xmlChar *name )
+ {
+ 	enum service_type type;
+@@ -495,14 +533,29 @@
+ 			in = mlt_properties_get_position( properties, "in" );
+ 		// Let Kino-SMIL clipBegin be a synonym for in
+ 		if ( mlt_properties_get( properties, "clipBegin" ) != NULL )
++		{
++			if ( strchr( mlt_properties_get( properties, "clipBegin" ), ':' ) )
++				// Parse clock value
++				in = parse_clock_value( mlt_properties_get( properties, "clipBegin" ),
++					mlt_properties_get_double( mlt_producer_properties( MLT_PRODUCER( producer ) ), "fps" ) );
++			else
++				// Parse frames value
+ 			in = mlt_properties_get_position( properties, "clipBegin" );
++		}
+ 		// Get out
+ 		if ( mlt_properties_get( properties, "out" ) != NULL )
+ 			out = mlt_properties_get_position( properties, "out" );
+ 		// Let Kino-SMIL clipEnd be a synonym for out
+ 		if ( mlt_properties_get( properties, "clipEnd" ) != NULL )
++		{
++			if ( strchr( mlt_properties_get( properties, "clipEnd" ), ':' ) )
++				// Parse clock value
++				out = parse_clock_value( mlt_properties_get( properties, "clipEnd" ),
++					mlt_properties_get_double( mlt_producer_properties( MLT_PRODUCER( producer ) ), "fps" ) );
++			else
++				// Parse frames value
+ 			out = mlt_properties_get_position( properties, "clipEnd" );
+-	
++		}
+ 		// Remove in and out
+ 		mlt_properties_set( properties, "in", NULL );
+ 		mlt_properties_set( properties, "out", NULL );

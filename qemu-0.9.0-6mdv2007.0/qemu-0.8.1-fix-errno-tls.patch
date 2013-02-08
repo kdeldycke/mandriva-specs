@@ -1,0 +1,11 @@
+diff -urpN qemu-0.8.1/target-i386/helper2.c qemu-0.8.1-fixed/target-i386/helper2.c
+--- qemu-0.8.1/target-i386/helper2.c	2006-05-03 22:32:58.000000000 +0200
++++ qemu-0.8.1-fixed/target-i386/helper2.c	2006-07-20 21:29:18.000000000 +0200
+@@ -24,6 +24,7 @@
+ #include <inttypes.h>
+ #include <signal.h>
+ #include <assert.h>
++#include <errno.h>
+ 
+ #include "cpu.h"
+ #include "exec-all.h"
