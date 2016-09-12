@@ -21,8 +21,8 @@ Mandriva version | Content
 License
 -------
 
-Unless contrary mention `spec` files and patches are distributed under the same
-license of the original package they aim to package.
+Unless contrary mention, `spec` files and patches are distributed under the
+same license of the original software they aim to package.
 
 All other content is licensed under a the [GNU General Public License v2 or
 later (GPLv2+)](LICENSE).
