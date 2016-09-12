@@ -16,3 +16,13 @@ Mandriva version | Content
 2007.1 | Amarok 1.4.7, Interreta Televidilo 0.6, Rugg 0.2.3, Python iCalendar 1.2, ...
 2007.0 | [Kdenlive](http://www.kdenlive.org) 0.4, Amarok 1.4.5, [SVK](http://svk.bestpractical.com) 2.0, Rugg 0.2.3, [Qemu](http://wiki.qemu.org) 0.9, [Grisbi](http://www.grisbi.org) 0.5.9, Python iCalendar 1.2, [Diva](http://www.mdk.org.pl/2006/12/7/state-of-diva) SVN trunk version, ...
 2006.0 | Amarok 1.4.3, [Tor](http://www.torproject.org) 0.1.1.21, Rugg 0.2.2, Qemu 0.7.2, Grisbi 0.5.8, [Baghira](http://baghira.sourceforge.net) 0.7, [Wormux](http://www.wormux.org) 0.7...
+
+
+License
+-------
+
+Unless contrary mention `spec` files and patches are distributed under the same
+license of the original package they aim to package.
+
+All other content is licensed under a the [GNU General Public License v2 or
+later (GPLv2+)](LICENSE).
